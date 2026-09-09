@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Waves } from 'lucide-react';
+import { Waves, AlertTriangle } from 'lucide-react';
 
 interface FloodSimulatorProps {
   waterLevel: number;
@@ -61,42 +61,62 @@ export default function FloodSimulator({
   }, [cdf, waterLevel, elevationMin, elevationMax, totalPixels]);
 
   return (
-    <div className="glass-panel p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <Waves className="w-4 h-4 text-blue-400" />
-        <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
-          Flood Simulator
-        </h3>
+    <div className="neo-card">
+      {/* Header */}
+      <div className="neo-card-header bg-[#00F0FF] text-black">
+        <span className="flex items-center gap-1.5 font-black">
+          <Waves className="w-4 h-4" /> Flood Inundation Simulator
+        </span>
+        <span className="font-mono text-[10px] bg-black text-[#00F0FF] px-1.5 py-0.5 border border-black">
+          UVP // DISASTER
+        </span>
       </div>
 
-      <div className="space-y-2">
-        <div className="flex justify-between text-xs text-slate-400">
-          <span>Water Level</span>
-          <span className="text-blue-400 font-mono">
-            {waterLevel.toFixed(1)} {unit}
-          </span>
+      <div className="p-3.5 space-y-3.5">
+        {/* Slider Controls */}
+        <div className="space-y-2">
+          <div className="flex justify-between items-center text-xs font-mono font-bold">
+            <span className="text-white/80 uppercase">Water Altitude</span>
+            <span className="bg-[#FFE600] text-black px-2 py-0.5 border border-black font-black">
+              {waterLevel.toFixed(1)} {unit}
+            </span>
+          </div>
+
+          <input
+            type="range"
+            min={elevationMin}
+            max={elevationMax}
+            step={Math.max((elevationMax - elevationMin) / 200, 0.01)}
+            value={waterLevel}
+            onChange={(e) => onWaterLevelChange(parseFloat(e.target.value))}
+            className="neo-slider"
+          />
+
+          <div className="flex justify-between text-[10px] font-mono text-white/50">
+            <span>MIN: {elevationMin.toFixed(1)}</span>
+            <span>MAX: {elevationMax.toFixed(1)}</span>
+          </div>
         </div>
-        <input
-          type="range"
-          min={elevationMin}
-          max={elevationMax}
-          step={Math.max((elevationMax - elevationMin) / 200, 0.01)}
-          value={waterLevel}
-          onChange={(e) => onWaterLevelChange(parseFloat(e.target.value))}
-          className="w-full"
-        />
-        <div className="flex justify-between text-xs text-slate-500">
-          <span>{elevationMin.toFixed(1)}</span>
-          <span>{elevationMax.toFixed(1)}</span>
+
+        {/* Inundated Percentage Box */}
+        <div className="bg-[#00F0FF] text-black border-2 border-black p-3 shadow-[3px_3px_0px_0px_#000]">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-3xl font-black tracking-tight leading-none">
+                {floodedPercent.toFixed(1)}%
+              </p>
+              <p className="text-[10px] font-mono font-black uppercase tracking-wider mt-1 text-black/80">
+                Terrain Submerged
+              </p>
+            </div>
+            {floodedPercent > 30 && (
+              <div className="bg-[#FF3366] text-white p-1.5 border-2 border-black">
+                <AlertTriangle className="w-5 h-5 animate-pulse" />
+              </div>
+            )}
+          </div>
         </div>
       </div>
-
-      {waterLevel > elevationMin && (
-        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-center">
-          <p className="text-2xl font-bold text-blue-400">{floodedPercent.toFixed(1)}%</p>
-          <p className="text-xs text-slate-400">Area Inundated</p>
-        </div>
-      )}
     </div>
   );
 }

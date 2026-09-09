@@ -316,11 +316,25 @@ export default function TerrainCanvas(props: TerrainCanvasProps) {
         <gridHelper args={[200, 50, '#1e293b', '#1e293b']} position={[0, -0.1, 0]} />
       </Canvas>
 
-      {/* HUD overlay */}
-      <div className="absolute bottom-4 left-4 glass-panel px-4 py-2 text-xs text-slate-400 space-y-1">
-        <p><span className="text-blue-400 font-medium">Click</span> canvas to lock mouse</p>
-        <p><span className="text-blue-400 font-medium">WASD</span> move · <span className="text-blue-400 font-medium">Q/E</span> up/down · <span className="text-blue-400 font-medium">Shift</span> sprint</p>
-        <p><span className="text-blue-400 font-medium">ESC</span> release mouse</p>
+      {/* Neo-Brutalist HUD overlay */}
+      <div className="absolute bottom-4 left-4 neo-box p-3 shadow-[5px_5px_0px_0px_#000] space-y-1.5 pointer-events-none">
+        <div className="flex items-center gap-1.5 text-[10px] font-black text-[#FFE600] uppercase tracking-wider mb-1">
+          <span className="w-2 h-2 bg-[#FFE600]" /> 6-DoF Flythrough Flight Controls
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="bg-[#FFE600] text-black font-black px-1.5 py-0.5 border border-black text-[10px] font-mono">CLICK</span>
+          <span className="text-white/80 font-mono text-[11px]">Lock mouse look (ESC to release)</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="bg-[#00F0FF] text-black font-black px-1.5 py-0.5 border border-black text-[10px] font-mono">WASD</span>
+          <span className="text-white/80 font-mono text-[11px]">Horizontal translation</span>
+          <span className="bg-[#00FF88] text-black font-black px-1.5 py-0.5 border border-black text-[10px] font-mono ml-1">Q / E</span>
+          <span className="text-white/80 font-mono text-[11px]">Ascend / Descend</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="bg-[#FF3366] text-white font-black px-1.5 py-0.5 border border-black text-[10px] font-mono">SHIFT</span>
+          <span className="text-white/80 font-mono text-[11px]">3.0× Turbo Sprint</span>
+        </div>
       </div>
     </div>
   );

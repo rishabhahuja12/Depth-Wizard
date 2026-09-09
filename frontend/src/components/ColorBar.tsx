@@ -8,16 +8,19 @@ interface ColorBarProps {
 
 export default function ColorBar({ min, max, unit }: ColorBarProps) {
   return (
-    <div className="flex flex-col items-center gap-1 glass-panel px-2 py-3">
-      <span className="text-xs text-slate-300 font-mono font-medium">{max.toFixed(1)}</span>
+    <div className="neo-box p-2.5 flex flex-col items-center gap-1.5 shadow-[4px_4px_0px_0px_#000]">
+      <div className="text-[9px] font-black uppercase tracking-wider text-[#FFE600]">TURBO DSM</div>
+      <span className="text-[11px] text-[#FF3366] font-mono font-black">{max.toFixed(1)}</span>
       <div
-        className="w-3 h-28 rounded-full border border-white/20 shadow-inner"
+        className="w-4 h-32 border-2 border-black"
         style={{
           background: 'linear-gradient(to bottom, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff)',
         }}
       />
-      <span className="text-xs text-slate-300 font-mono font-medium">{min.toFixed(1)}</span>
-      <span className="text-[10px] text-slate-400 mt-1">{unit}</span>
+      <span className="text-[11px] text-[#00FF88] font-mono font-black">{min.toFixed(1)}</span>
+      <span className="text-[9px] font-mono font-bold text-white/60 bg-black px-1 border border-white/20">
+        {unit}
+      </span>
     </div>
   );
 }

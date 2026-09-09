@@ -1,10 +1,15 @@
 @import "tailwindcss";
 
 :root {
-  --accent: 217 91% 60%;
-  --bg-primary: 222 47% 6%;
-  --bg-card: 215 28% 10%;
-  --border-subtle: 215 20% 18%;
+  --neo-bg: #0D0F12;
+  --neo-surface: #161A22;
+  --neo-card: #1F2430;
+  --neo-yellow: #FFE600;
+  --neo-cyan: #00F0FF;
+  --neo-pink: #FF3366;
+  --neo-green: #00FF88;
+  --neo-purple: #A78BFA;
+  --neo-orange: #FF7700;
 }
 
 * {
@@ -14,9 +19,9 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background: hsl(var(--bg-primary));
-  color: #e2e8f0;
+  font-family: 'Space Grotesk', 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #0A0C10;
+  color: #FFFFFF;
   overflow: hidden;
   height: 100vh;
 }
@@ -25,51 +30,118 @@ body {
   height: 100vh;
 }
 
-/* Glassmorphism panel base */
-.glass-panel {
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+/* === Neo-Brutalist Core Utilities === */
+
+.neo-box {
+  background: #161A22;
+  border: 2.5px solid #000000;
+  box-shadow: 4px 4px 0px 0px #000000;
 }
 
-.glass-panel-strong {
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(30px);
-  -webkit-backdrop-filter: blur(30px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 16px;
+.neo-box-white {
+  background: #161A22;
+  border: 2.5px solid #FFFFFF;
+  box-shadow: 4px 4px 0px 0px #FFFFFF;
+}
+
+.neo-card {
+  background: #151821;
+  border: 2.5px solid #000000;
+  box-shadow: 4px 4px 0px 0px #000000;
+  overflow: hidden;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.neo-card-header {
+  border-bottom: 2.5px solid #000000;
+  padding: 8px 12px;
+  font-weight: 900;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.neo-btn {
+  border: 2.5px solid #000000;
+  box-shadow: 3px 3px 0px 0px #000000;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: all 0.1s ease;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.neo-btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0px 0px #000000;
+}
+
+.neo-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0px 0px #000000;
+}
+
+.neo-badge {
+  border: 2px solid #000000;
+  box-shadow: 2px 2px 0px 0px #000000;
+  font-weight: 800;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* === Neo-Brutalist Chunky Sliders === */
+
+input[type="range"].neo-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 12px;
+  background: #252B3B;
+  border: 2px solid #000000;
+  border-radius: 0px;
+  outline: none;
+  box-shadow: 2px 2px 0px 0px #000000;
+}
+
+input[type="range"].neo-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 24px;
+  background: #FFE600;
+  border: 2.5px solid #000000;
+  border-radius: 0px;
+  cursor: pointer;
+  box-shadow: 2px 2px 0px 0px #000000;
+  transition: transform 0.1s ease;
+}
+
+input[type="range"].neo-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  background: #00F0FF;
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: #0D0F12;
+  border-left: 2px solid #000000;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 3px;
-}
-
-/* Slider styling */
-input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.1);
-  outline: none;
-}
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: hsl(var(--accent));
-  cursor: pointer;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  background: #FFE600;
+  border: 2px solid #000000;
 }

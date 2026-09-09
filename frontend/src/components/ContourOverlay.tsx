@@ -13,22 +13,27 @@ export default function ContourOverlay({ active, onToggle, interval, onIntervalC
     <div className="space-y-2">
       <button
         onClick={onToggle}
-        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all w-full
-          ${active
-            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-            : 'bg-white/5 text-slate-400 hover:bg-white/10 border border-white/5'
-          }`}
+        className={`w-full neo-btn text-xs py-2 px-3 flex items-center justify-between transition-colors cursor-pointer ${
+          active ? 'bg-[#FFE600] text-black shadow-[3px_3px_0px_0px_#000]' : 'bg-[#1A1D24] text-white hover:bg-white/10'
+        }`}
       >
-        <Map className="w-4 h-4" />
-        Contour Lines
-        <span className="ml-auto text-xs opacity-60">{active ? 'ON' : 'OFF'}</span>
+        <span className="flex items-center gap-1.5 font-black">
+          <Map className="w-3.5 h-3.5" /> Topographic Contours
+        </span>
+        <span
+          className={`font-mono text-[10px] font-black px-1.5 py-0.5 border ${
+            active ? 'bg-black text-[#FFE600] border-black' : 'bg-black/60 text-white/70 border-white/20'
+          }`}
+        >
+          {active ? 'ACTIVE' : 'OFF'}
+        </span>
       </button>
 
       {active && (
-        <div className="pl-2 space-y-1">
-          <div className="flex justify-between text-xs text-slate-400">
-            <span>Interval</span>
-            <span className="font-mono">{interval.toFixed(1)}</span>
+        <div className="bg-black/50 border-2 border-black p-2.5 space-y-1.5">
+          <div className="flex justify-between text-[11px] font-mono font-bold text-white/80">
+            <span>Interval Step</span>
+            <span className="text-[#FFE600]">{interval.toFixed(1)}m</span>
           </div>
           <input
             type="range"
@@ -37,8 +42,12 @@ export default function ContourOverlay({ active, onToggle, interval, onIntervalC
             step={0.5}
             value={interval}
             onChange={(e) => onIntervalChange(parseFloat(e.target.value))}
-            className="w-full"
+            className="neo-slider"
           />
+          <div className="flex justify-between text-[9px] font-mono text-white/40">
+            <span>0.5m</span>
+            <span>20.0m</span>
+          </div>
         </div>
       )}
     </div>

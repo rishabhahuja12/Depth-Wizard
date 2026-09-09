@@ -35,3 +35,20 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api")
+
+
+@app.get("/")
+async def root():
+    import torch
+    device = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+    return {
+        "service": "DepthWizard API",
+        "project": "SIH26175 - ISRO Space Applications Centre",
+        "description": "Single-View Satellite Elevation Estimation & 3D Flythrough",
+        "status": "online",
+        "docs_url": "/docs",
+        "api_health": "/api/health",
+        "api_upload": "/api/upload",
+        "device": device,
+        "version": "1.0.0"
+    }

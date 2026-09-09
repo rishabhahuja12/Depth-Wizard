@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Scissors } from 'lucide-react';
+import { Scissors, X } from 'lucide-react';
 
 interface CrossSectionProps {
   dsmRaw: number[][];
@@ -44,79 +44,83 @@ export default function CrossSection({ dsmRaw, unit, active, onToggle, pixelSize
 
   if (!active || profileData.length === 0) {
     return (
-      <div className="glass-panel p-4">
+      <div className="neo-card">
         <button
           onClick={onToggle}
-          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all w-full
-            ${active
-              ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-              : 'bg-white/5 text-slate-400 hover:bg-white/10 border border-white/5'
-            }`}
+          className="w-full bg-[#1A1D24] text-white hover:bg-[#FFE600] hover:text-black font-black text-xs uppercase tracking-wider p-3 flex items-center justify-between transition-colors cursor-pointer"
         >
-          <Scissors className="w-4 h-4" />
-          Cross-Section Profile
+          <span className="flex items-center gap-2">
+            <Scissors className="w-4 h-4 text-[#FF3366]" /> Cross-Section Profile
+          </span>
+          <span className="bg-black text-white text-[10px] px-2 py-0.5 border border-white/30 font-mono">
+            EXPAND
+          </span>
         </button>
       </div>
     );
   }
 
   return (
-    <div className="glass-panel p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Scissors className="w-4 h-4 text-blue-400" />
-          <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
-            Elevation Profile
-          </h3>
-        </div>
+    <div className="neo-card">
+      <div className="neo-card-header bg-[#FF3366] text-white">
+        <span className="flex items-center gap-1.5 font-black">
+          <Scissors className="w-4 h-4" /> Elevation Transect
+        </span>
         <button
           onClick={onToggle}
-          className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+          className="bg-black text-white p-1 hover:bg-white hover:text-black transition-colors cursor-pointer"
+          title="Close Transect"
         >
-          Close
+          <X className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      <p className="text-xs text-slate-500">
-        Horizontal cross-section transect (center axis{isMetric ? ` · ${distScale.toFixed(2)}m GSD` : ''})
-      </p>
+      <div className="p-3 space-y-2">
+        <div className="flex justify-between items-center text-[10px] font-mono text-white/70">
+          <span>Center Axis Transect</span>
+          <span className="text-[#FFE600] font-bold">
+            {isMetric ? `${distScale.toFixed(2)}m GSD` : 'Relative Coordinates'}
+          </span>
+        </div>
 
-      <div className="h-44">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={profileData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis
-              dataKey="distance"
-              stroke="#64748b"
-              fontSize={10}
-              tickFormatter={(v) => `${Number(v).toFixed(0)}${distUnit}`}
-            />
-            <YAxis
-              stroke="#64748b"
-              fontSize={10}
-              tickFormatter={(v) => `${Number(v).toFixed(1)}`}
-            />
-            <Tooltip
-              contentStyle={{
-                background: 'rgba(15, 23, 42, 0.95)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: '8px',
-                color: '#e2e8f0',
-                fontSize: '12px',
-              }}
-              formatter={(value: any) => [`${Number(value).toFixed(2)} ${unit}`, 'Elevation']}
-              labelFormatter={(label) => `Distance: ${label} ${distUnit}`}
-            />
-            <Line
-              type="monotone"
-              dataKey="elevation"
-              stroke="#3b82f6"
-              strokeWidth={2}
-              dot={false}
-              activeDot={{ r: 4, fill: '#3b82f6' }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+        <div className="h-44 bg-black border-2 border-black p-2">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={profileData}>
+              <CartesianGrid strokeDasharray="2 2" stroke="#262b38" />
+              <XAxis
+                dataKey="distance"
+                stroke="#8c97ab"
+                fontSize={10}
+                tickFormatter={(v) => `${Number(v).toFixed(0)}${distUnit}`}
+              />
+              <YAxis
+                stroke="#8c97ab"
+                fontSize={10}
+                tickFormatter={(v) => `${Number(v).toFixed(1)}`}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: '#12151B',
+                  border: '2px solid #000000',
+                  boxShadow: '3px 3px 0px 0px #000',
+                  color: '#ffffff',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                }}
+                formatter={(value: any) => [`${Number(value).toFixed(2)} ${unit}`, 'Height']}
+                labelFormatter={(label) => `Distance: ${label} ${distUnit}`}
+              />
+              <Line
+                type="monotone"
+                dataKey="elevation"
+                stroke="#00F0FF"
+                strokeWidth={2.5}
+                dot={false}
+                activeDot={{ r: 5, fill: '#FFE600', stroke: '#000000', strokeWidth: 2 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
       </div>
     </div>
   );
