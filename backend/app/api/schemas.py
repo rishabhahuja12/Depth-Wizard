@@ -12,11 +12,13 @@ class InferenceResponse(BaseModel):
     request_id: str
     heightmap_b64: str
     rgb_b64: str
+    normal_map_b64: Optional[str] = None
     dsm_colorized_b64: str
     mesh_stats: dict
     calibration: dict
     dsm_raw: list  # Full resolution DSM for frontend tools
     is_georef: bool
+    confidence_mean: Optional[float] = None
     inference_time_ms: float
 
 

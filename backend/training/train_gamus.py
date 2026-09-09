@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import time
 import json
+import contextlib
 import torch
 import torch.nn as nn
 from torch.amp import autocast, GradScaler
@@ -74,7 +75,7 @@ def train():
         return 0.5 * (1.0 + torch.cos(torch.tensor(progress * 3.14159)).item())
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-    scaler = GradScaler('cuda')
+    scaler = GradScaler('cuda', enabled=(device.type == 'cuda'))
     criterion = CombinedLoss(alpha=0.5).to(device)
 
     # 5. Logging
@@ -98,7 +99,12 @@ def train():
 
             optimizer.zero_grad(set_to_none=True)
 
-            with autocast('cuda', dtype=torch.float16):
+            autocast_ctx = (
+                autocast('cuda', dtype=torch.float16)
+                if device.type == 'cuda'
+                else contextlib.nullcontext()
+            )
+            with autocast_ctx:
                 outputs = model(pixel_values=images)
                 pred = outputs.predicted_depth
 
@@ -120,12 +126,17 @@ def train():
 
                 loss = criterion(pred_norm, target_norm)
 
-            scaler.scale(loss).backward()
-            # Gradient clipping (Issue 9)
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
-            scaler.step(optimizer)
-            scaler.update()
+            if scaler.is_enabled():
+                scaler.scale(loss).backward()
+                # Gradient clipping (Issue 9)
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
+                optimizer.step()
 
             epoch_loss += loss.item()
 

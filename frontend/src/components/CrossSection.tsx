@@ -7,6 +7,7 @@ interface CrossSectionProps {
   unit: string;
   active: boolean;
   onToggle: () => void;
+  pixelSize?: number;
 }
 
 interface ProfilePoint {
@@ -14,8 +15,12 @@ interface ProfilePoint {
   elevation: number;
 }
 
-export default function CrossSection({ dsmRaw, unit, active, onToggle }: CrossSectionProps) {
+export default function CrossSection({ dsmRaw, unit, active, onToggle, pixelSize }: CrossSectionProps) {
   // Horizontal cross-section through center of the elevation map
+  const isMetric = unit === 'meters' && pixelSize !== undefined && pixelSize > 0;
+  const distScale = isMetric ? pixelSize! : 1.0;
+  const distUnit = isMetric ? 'm' : 'px';
+
   const profileData = useMemo<ProfilePoint[]>(() => {
     if (!dsmRaw || dsmRaw.length === 0) return [];
 
@@ -30,12 +35,12 @@ export default function CrossSection({ dsmRaw, unit, active, onToggle }: CrossSe
     for (let k = 0; k < K; k++) {
       const col = Math.floor((k / (K - 1)) * (w - 1));
       const elevation = dsmRaw[midRow]?.[col] ?? 0;
-      const distance = (k / (K - 1)) * w;
+      const distance = (k / (K - 1)) * (w * distScale);
       points.push({ distance: Math.round(distance * 10) / 10, elevation: Math.round(elevation * 100) / 100 });
     }
 
     return points;
-  }, [dsmRaw]);
+  }, [dsmRaw, distScale]);
 
   if (!active || profileData.length === 0) {
     return (
@@ -73,7 +78,7 @@ export default function CrossSection({ dsmRaw, unit, active, onToggle }: CrossSe
       </div>
 
       <p className="text-xs text-slate-500">
-        Horizontal cross-section transect (center axis)
+        Horizontal cross-section transect (center axis{isMetric ? ` · ${distScale.toFixed(2)}m GSD` : ''})
       </p>
 
       <div className="h-44">
@@ -84,7 +89,7 @@ export default function CrossSection({ dsmRaw, unit, active, onToggle }: CrossSe
               dataKey="distance"
               stroke="#64748b"
               fontSize={10}
-              tickFormatter={(v) => `${Number(v).toFixed(0)}`}
+              tickFormatter={(v) => `${Number(v).toFixed(0)}${distUnit}`}
             />
             <YAxis
               stroke="#64748b"
@@ -100,7 +105,7 @@ export default function CrossSection({ dsmRaw, unit, active, onToggle }: CrossSe
                 fontSize: '12px',
               }}
               formatter={(value: any) => [`${Number(value).toFixed(2)} ${unit}`, 'Elevation']}
-              labelFormatter={(label) => `Distance: ${label} px`}
+              labelFormatter={(label) => `Distance: ${label} ${distUnit}`}
             />
             <Line
               type="monotone"

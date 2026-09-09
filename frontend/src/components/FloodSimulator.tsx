@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Waves } from 'lucide-react';
 
 interface FloodSimulatorProps {
@@ -13,19 +13,52 @@ interface FloodSimulatorProps {
 export default function FloodSimulator({
   waterLevel, onWaterLevelChange, elevationMin, elevationMax, unit, dsmRaw
 }: FloodSimulatorProps) {
-  // Calculate flooded percentage
-  let floodedPercent = 0;
-  if (dsmRaw && dsmRaw.length > 0 && waterLevel > 0) {
+  // Precompute 512-bin cumulative distribution function (CDF) for O(1) slider evaluation
+  const { cdf, totalPixels } = useMemo(() => {
+    if (!dsmRaw || dsmRaw.length === 0) return { cdf: null, totalPixels: 0 };
+    const numBins = 512;
+    const counts = new Uint32Array(numBins);
     let total = 0;
-    let flooded = 0;
-    for (const row of dsmRaw) {
-      for (const val of row) {
+    const range = elevationMax - elevationMin;
+    const scale = range > 1e-6 ? (numBins - 1) / range : 0;
+
+    for (let i = 0; i < dsmRaw.length; i++) {
+      const row = dsmRaw[i];
+      for (let j = 0; j < row.length; j++) {
+        const val = row[j];
+        const bin = Math.max(0, Math.min(numBins - 1, Math.floor((val - elevationMin) * scale)));
+        counts[bin]++;
         total++;
-        if (val < waterLevel) flooded++;
       }
     }
-    floodedPercent = total > 0 ? (flooded / total) * 100 : 0;
-  }
+
+    if (total === 0) return { cdf: null, totalPixels: 0 };
+
+    const cdfArray = new Float32Array(numBins);
+    let accum = 0;
+    for (let b = 0; b < numBins; b++) {
+      accum += counts[b];
+      cdfArray[b] = (accum / total) * 100;
+    }
+    return { cdf: cdfArray, totalPixels: total };
+  }, [dsmRaw, elevationMin, elevationMax]);
+
+  // O(1) lookup of inundated percentage on slider tick with continuous piecewise linear interpolation
+  const floodedPercent = useMemo(() => {
+    if (!cdf || totalPixels === 0) return 0;
+    if (waterLevel <= elevationMin) return 0;
+    if (waterLevel >= elevationMax) return 100;
+    const numBins = cdf.length;
+    const range = elevationMax - elevationMin;
+    if (range < 1e-6) return 0;
+    const norm = Math.max(0, Math.min(1, (waterLevel - elevationMin) / range));
+    const floatBin = norm * (numBins - 1);
+    const i0 = Math.floor(floatBin);
+    const frac = floatBin - i0;
+    const c0 = i0 > 0 ? cdf[i0 - 1] : 0;
+    const c1 = cdf[i0];
+    return Math.min(100, Math.max(0, c0 + (c1 - c0) * frac));
+  }, [cdf, waterLevel, elevationMin, elevationMax, totalPixels]);
 
   return (
     <div className="glass-panel p-4 space-y-3">
@@ -58,7 +91,7 @@ export default function FloodSimulator({
         </div>
       </div>
 
-      {waterLevel > 0 && (
+      {waterLevel > elevationMin && (
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-center">
           <p className="text-2xl font-bold text-blue-400">{floodedPercent.toFixed(1)}%</p>
           <p className="text-xs text-slate-400">Area Inundated</p>

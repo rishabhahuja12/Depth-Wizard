@@ -26,11 +26,13 @@ export interface InferenceResult {
   request_id: string;
   heightmap_b64: string;
   rgb_b64: string;
+  normal_map_b64?: string;
   dsm_colorized_b64: string;
   mesh_stats: MeshStats;
   calibration: CalibrationData;
   dsm_raw: number[][];
   is_georef: boolean;
+  confidence_mean?: number;
   inference_time_ms: number;
 }
 

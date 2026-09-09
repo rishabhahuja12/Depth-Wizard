@@ -4,6 +4,7 @@ Uses HuggingFace transformers for loading pretrained weights.
 Supports optional fine-tuned weight loading.
 """
 import torch
+import contextlib
 import numpy as np
 from PIL import Image
 from transformers import AutoImageProcessor, AutoModelForDepthEstimation
@@ -57,7 +58,12 @@ class DepthEstimator:
         inputs = self.processor(images=rgb_image, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-        with torch.amp.autocast('cuda', dtype=torch.float16):  # Issue 7 fix: use torch.amp not torch.cuda.amp
+        autocast_ctx = (
+            torch.amp.autocast('cuda', dtype=torch.float16)
+            if self.device.type == 'cuda'
+            else contextlib.nullcontext()
+        )
+        with autocast_ctx:
             outputs = self.model(**inputs)
 
         predicted_depth = outputs.predicted_depth
@@ -68,7 +74,7 @@ class DepthEstimator:
             size=(original_size[1], original_size[0]),  # (H, W)
             mode="bicubic",
             align_corners=False,
-        ).squeeze()
+        )[0, 0]
 
         depth = prediction.cpu().numpy().astype(np.float32)
 
@@ -95,13 +101,18 @@ class DepthEstimator:
         predictions = []
 
         for _ in range(n_passes):
-            with torch.amp.autocast('cuda', dtype=torch.float16):  # Issue 7 fix
+            autocast_ctx = (
+                torch.amp.autocast('cuda', dtype=torch.float16)
+                if self.device.type == 'cuda'
+                else contextlib.nullcontext()
+            )
+            with autocast_ctx:
                 outputs = self.model(**inputs)
             pred = torch.nn.functional.interpolate(
                 outputs.predicted_depth.unsqueeze(1),
                 size=(original_size[1], original_size[0]),
                 mode="bicubic", align_corners=False
-            ).squeeze()
+            )[0, 0]
             predictions.append(pred)
 
         self.model.eval()

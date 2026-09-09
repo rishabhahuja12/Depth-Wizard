@@ -19,6 +19,13 @@ export default function App() {
   const [contourInterval, setContourInterval] = useState(5);
   const [showCrossSection, setShowCrossSection] = useState(false);
 
+  // Synchronize water level with newly loaded terrain elevation
+  React.useEffect(() => {
+    if (data?.calibration) {
+      setWaterLevel(data.calibration.min);
+    }
+  }, [data]);
+
   const handleFileSelected = (file: File) => {
     upload(file);
   };
@@ -122,6 +129,7 @@ export default function App() {
             unit={cal.unit}
             active={showCrossSection}
             onToggle={() => setShowCrossSection(!showCrossSection)}
+            pixelSize={data.mesh_stats.pixel_size}
           />
 
           <SettingsPanel
@@ -140,10 +148,12 @@ export default function App() {
           <TerrainCanvas
             heightmapB64={data.heightmap_b64}
             rgbB64={data.rgb_b64}
+            normalMapB64={data.normal_map_b64}
             meshStats={data.mesh_stats}
             verticalScale={verticalScale}
             waterLevel={waterLevel}
             showContours={showContours}
+            contourInterval={contourInterval}
             dsmRaw={data.dsm_raw}
           />
           <div className="absolute top-3 right-3 pointer-events-none">

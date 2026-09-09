@@ -14,19 +14,41 @@ class SILogLoss(nn.Module):
         self.eps = eps
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        valid = target > self.eps
-        if valid.sum() < 10:
-            # Issue 5 fix: preserve gradient connectivity (don't return a detached leaf tensor)
+        # Standardize shapes to (B, H, W)
+        if pred.dim() == 4 and pred.shape[1] == 1:
+            pred = pred.squeeze(1)
+        if target.dim() == 4 and target.shape[1] == 1:
+            target = target.squeeze(1)
+
+        if pred.dim() == 2:
+            pred = pred.unsqueeze(0)
+            target = target.unsqueeze(0)
+
+        batch_size = pred.shape[0]
+        losses = []
+
+        # Audit Finding 4.1 FIX: Per-sample SILog calculation eliminates cross-sample prediction bias coupling
+        for b in range(batch_size):
+            p = pred[b]
+            t = target[b]
+            valid = t > self.eps
+            if valid.sum() < 10:
+                # Preserve autograd connectivity
+                losses.append(p.sum() * 0.0)
+                continue
+
+            pred_valid = p[valid].clamp(min=self.eps)
+            target_valid = t[valid]
+
+            d = torch.log(pred_valid) - torch.log(target_valid)
+            n = d.numel()
+
+            loss_b = (d ** 2).sum() / n - self.lambd * (d.sum() ** 2) / (n ** 2)
+            losses.append(loss_b)
+
+        if len(losses) == 0:
             return pred.sum() * 0.0
-
-        pred_valid = pred[valid].clamp(min=self.eps)
-        target_valid = target[valid]
-
-        d = torch.log(pred_valid) - torch.log(target_valid)
-        n = d.numel()
-
-        loss = (d ** 2).sum() / n - self.lambd * (d.sum() ** 2) / (n ** 2)
-        return loss
+        return torch.stack(losses).mean()
 
 
 class GradientMatchingLoss(nn.Module):

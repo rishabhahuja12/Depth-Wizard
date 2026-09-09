@@ -19,8 +19,15 @@ def compute_metrics(pred: np.ndarray, ref: np.ndarray) -> ValidationMetrics:
     """
     assert pred.shape == ref.shape, f"Shape mismatch: {pred.shape} vs {ref.shape}"
 
-    # Mask invalid pixels
-    valid = (ref > 0.01) & np.isfinite(pred) & np.isfinite(ref)
+    # Mask invalid pixels and nodata values (e.g., -9999)
+    valid = (
+        np.isfinite(pred)
+        & np.isfinite(ref)
+        & (ref > -9000.0)
+        & (ref < 15000.0)
+        & (pred > -9000.0)
+        & (pred < 15000.0)
+    )
     p = pred[valid]
     r = ref[valid]
     n = p.size
@@ -41,8 +48,17 @@ def compute_metrics(pred: np.ndarray, ref: np.ndarray) -> ValidationMetrics:
         pearson_r = 0.0
 
     # Delta accuracy (% within 1.25x)
-    ratio = np.maximum(p / (r + 1e-8), r / (p + 1e-8))
-    delta_1 = float(np.mean(ratio < 1.25) * 100)
+    # If all values are strictly positive, compute standard depth ratio
+    if np.all(p > 0.01) and np.all(r > 0.01):
+        ratio = np.maximum(p / (r + 1e-8), r / (p + 1e-8))
+        delta_1 = float(np.mean(ratio < 1.25) * 100)
+    else:
+        # For terrain with negative or sea-level elevations, shift baseline to ensure positive ratio
+        shift = max(0.0, -float(min(p.min(), r.min()))) + 1.0
+        p_shift = p + shift
+        r_shift = r + shift
+        ratio = np.maximum(p_shift / r_shift, r_shift / p_shift)
+        delta_1 = float(np.mean(ratio < 1.25) * 100)
 
     return ValidationMetrics(
         rmse=rmse, mae=mae, pearson_r=pearson_r,

@@ -32,8 +32,95 @@ async def health():
     return HealthResponse(status="ok", gpu=gpu, vram_gb=round(vram, 2))
 
 
+from starlette.concurrency import run_in_threadpool
+
+
+def _process_pipeline(file_bytes: bytes, filename: str, request_id: str, estimator, estimate_uncertainty: bool = False):
+    """Synchronous pipeline executed in threadpool to prevent event-loop blocking."""
+    from app.services.geospatial import read_image
+    from app.services.calibration import calibrate_depth
+    from app.services.mesh_builder import build_mesh_data
+    import json
+    import rasterio
+    from rasterio.transform import Affine
+
+    # 1. Ingest image
+    rgb, pil_image, metadata = read_image(file_bytes, filename)
+
+    # 2. Depth prediction (standard or MC dropout uncertainty)
+    conf_mean = None
+    if estimate_uncertainty:
+        relative_depth, conf = estimator.predict_with_confidence(pil_image)
+        conf_mean = float(conf.mean())
+    else:
+        relative_depth = estimator.predict(pil_image)
+
+    # 3. Calibration
+    cal_result = calibrate_depth(
+        relative_depth,
+        is_georef=metadata.is_georef,
+        gsd=metadata.gsd,
+    )
+
+    # 4. Mesh generation
+    mesh_data = build_mesh_data(
+        dsm=cal_result.dsm,
+        rgb=rgb,
+        pixel_size=metadata.gsd or 1.0,
+    )
+
+    # 5. Persist cache
+    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    np.save(EXPORTS_DIR / f"{request_id}_dsm.npy", cal_result.dsm)
+    np.save(EXPORTS_DIR / f"{request_id}_rgb.npy", rgb)
+
+    meta_dict = {
+        "is_georef": metadata.is_georef,
+        "crs": metadata.crs,
+        "transform": metadata.transform,
+        "width": metadata.width,
+        "height": metadata.height,
+    }
+    with open(EXPORTS_DIR / f"{request_id}_meta.json", "w") as f:
+        json.dump(meta_dict, f)
+
+    # 6. Pre-generate GeoTIFF once safely using atomic replace to avoid Windows file-lock contention
+    output_path = EXPORTS_DIR / f"{request_id}_dsm.tif"
+    if not output_path.exists():
+        import os
+        if metadata.transform:
+            transform = Affine(*metadata.transform)
+            crs = metadata.crs
+        else:
+            transform = Affine(1.0, 0, 0, 0, -1.0, cal_result.dsm.shape[0])
+            crs = None
+
+        temp_path = EXPORTS_DIR / f"{request_id}_{uuid.uuid4().hex[:6]}_temp.tif"
+        with rasterio.open(
+            str(temp_path), 'w', driver='GTiff',
+            height=cal_result.dsm.shape[0], width=cal_result.dsm.shape[1],
+            count=1, dtype='float32',
+            crs=crs, transform=transform,
+        ) as dst:
+            dst.write(cal_result.dsm, 1)
+
+        try:
+            os.replace(temp_path, output_path)
+        except OSError:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+
+    return metadata, cal_result, mesh_data, conf_mean
+
+
 @router.post("/upload", response_model=InferenceResponse)
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(
+    file: UploadFile = File(...),
+    estimate_uncertainty: bool = False,
+):
     request_id = str(uuid.uuid4())[:8]
     t_start = time.time()
 
@@ -49,50 +136,17 @@ async def upload_image(file: UploadFile = File(...)):
     if size_mb > MAX_UPLOAD_SIZE_MB:
         raise HTTPException(413, f"File too large ({size_mb:.1f}MB). Max: {MAX_UPLOAD_SIZE_MB}MB")
 
-    # 2. Read image
-    from app.services.geospatial import read_image
+    if depth_estimator is None:
+        raise HTTPException(503, "Depth estimator service is not ready")
+
+    # 2. Run synchronous ML & Geospatial pipeline in worker threadpool (non-blocking)
     try:
-        rgb, pil_image, metadata = read_image(file_bytes, file.filename)
+        metadata, cal_result, mesh_data, conf_mean = await run_in_threadpool(
+            _process_pipeline, file_bytes, file.filename, request_id, depth_estimator, estimate_uncertainty
+        )
     except Exception as e:
-        log.error("Failed to read image", error=str(e))
-        raise HTTPException(422, f"Failed to read image: {str(e)}")
-
-    # 3. Depth inference
-    from app.services.depth_estimator import DepthEstimator
-    relative_depth = depth_estimator.predict(pil_image)
-
-    # 4. Calibration
-    from app.services.calibration import calibrate_depth
-    cal_result = calibrate_depth(
-        relative_depth,
-        is_georef=metadata.is_georef,
-        gsd=metadata.gsd,
-    )
-
-    # 5. Build mesh data
-    from app.services.mesh_builder import build_mesh_data
-    mesh_data = build_mesh_data(
-        dsm=cal_result.dsm,
-        rgb=rgb,
-        pixel_size=metadata.gsd or 1.0,
-    )
-
-    # 6. Cache DSM for export
-    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    np.save(EXPORTS_DIR / f"{request_id}_dsm.npy", cal_result.dsm)
-    np.save(EXPORTS_DIR / f"{request_id}_rgb.npy", rgb)
-
-    # Save metadata for export
-    import json
-    meta_dict = {
-        "is_georef": metadata.is_georef,
-        "crs": metadata.crs,
-        "transform": metadata.transform,
-        "width": metadata.width,
-        "height": metadata.height,
-    }
-    with open(EXPORTS_DIR / f"{request_id}_meta.json", "w") as f:
-        json.dump(meta_dict, f)
+        log.error("Pipeline failed", request_id=request_id, error=str(e))
+        raise HTTPException(422, f"Pipeline failed: {str(e)}")
 
     inference_time = (time.time() - t_start) * 1000
 
@@ -104,6 +158,7 @@ async def upload_image(file: UploadFile = File(...)):
         request_id=request_id,
         heightmap_b64=mesh_data["heightmap_b64"],
         rgb_b64=mesh_data["rgb_b64"],
+        normal_map_b64=mesh_data.get("normal_map_b64"),
         dsm_colorized_b64=mesh_data["dsm_colorized_b64"],
         mesh_stats=mesh_data["mesh_stats"],
         calibration={
@@ -116,44 +171,59 @@ async def upload_image(file: UploadFile = File(...)):
         },
         dsm_raw=mesh_data["dsm_raw"],
         is_georef=metadata.is_georef,
+        confidence_mean=conf_mean,
         inference_time_ms=round(inference_time, 1),
     )
 
 
 @router.get("/export/{request_id}")
 async def export_dsm(request_id: str):
-    """Download computed DSM as GeoTIFF."""
+    """Download computed DSM as GeoTIFF without Windows file lock race."""
+    output_path = EXPORTS_DIR / f"{request_id}_dsm.tif"
     dsm_path = EXPORTS_DIR / f"{request_id}_dsm.npy"
     meta_path = EXPORTS_DIR / f"{request_id}_meta.json"
 
-    if not dsm_path.exists():
-        raise HTTPException(404, "DSM not found. Run inference first.")
+    # If GeoTIFF does not already exist, create it once safely
+    if not output_path.exists():
+        if not dsm_path.exists() or not meta_path.exists():
+            raise HTTPException(404, "DSM not found. Run inference first.")
 
-    dsm = np.load(dsm_path)
+        def _generate_tif():
+            import json
+            import os
+            import rasterio
+            from rasterio.transform import Affine
 
-    import json
-    with open(meta_path) as f:
-        meta = json.load(f)
+            dsm = np.load(dsm_path)
+            with open(meta_path) as f:
+                meta = json.load(f)
 
-    output_path = EXPORTS_DIR / f"{request_id}_dsm.tif"
+            if meta.get("transform"):
+                transform = Affine(*meta["transform"])
+                crs = meta["crs"]
+            else:
+                transform = Affine(1.0, 0, 0, 0, -1.0, dsm.shape[0])
+                crs = None
 
-    import rasterio
-    from rasterio.transform import Affine
+            temp_path = EXPORTS_DIR / f"{request_id}_{uuid.uuid4().hex[:6]}_temp.tif"
+            with rasterio.open(
+                str(temp_path), 'w', driver='GTiff',
+                height=dsm.shape[0], width=dsm.shape[1],
+                count=1, dtype='float32',
+                crs=crs, transform=transform,
+            ) as dst:
+                dst.write(dsm, 1)
 
-    if meta["transform"]:
-        transform = Affine(*meta["transform"])
-        crs = meta["crs"]
-    else:
-        transform = Affine(1.0, 0, 0, 0, -1.0, dsm.shape[0])
-        crs = None
+            try:
+                os.replace(temp_path, output_path)
+            except OSError:
+                if temp_path.exists():
+                    try:
+                        temp_path.unlink()
+                    except OSError:
+                        pass
 
-    with rasterio.open(
-        str(output_path), 'w', driver='GTiff',
-        height=dsm.shape[0], width=dsm.shape[1],
-        count=1, dtype='float32',
-        crs=crs, transform=transform,
-    ) as dst:
-        dst.write(dsm, 1)
+        await run_in_threadpool(_generate_tif)
 
     return FileResponse(
         str(output_path),

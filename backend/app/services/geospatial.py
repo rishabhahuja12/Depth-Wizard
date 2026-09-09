@@ -54,17 +54,37 @@ def _read_geotiff(file_bytes: bytes, metadata: ImageMetadata) -> tuple:
         rgb = np.stack([ds.read(i + 1) for i in range(bands_to_read)], axis=-1)
 
         if bands_to_read == 1:
-            rgb = np.stack([rgb.squeeze()] * 3, axis=-1)
+            rgb = np.repeat(rgb[..., :1], 3, axis=-1)
+        elif bands_to_read == 2:
+            # 2-channel raster (e.g., dual-pol SAR or Pan+NIR): synthesize 3rd channel via average
+            ch3 = ((rgb[..., 0].astype(np.float32) + rgb[..., 1].astype(np.float32)) / 2.0).astype(rgb.dtype)
+            rgb = np.dstack([rgb, ch3])
 
-        # Handle 16-bit images
-        if rgb.dtype == np.uint16:
-            rgb = (rgb / 256).astype(np.uint8)
-        elif rgb.dtype == np.float32 or rgb.dtype == np.float64:
-            rgb = (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
+        # Handle non-uint8 satellite imagery (16-bit, signed int, float) with 2%-98% percentile stretching
+        if rgb.dtype != np.uint8:
+            stretched = np.empty((rgb.shape[0], rgb.shape[1], 3), dtype=np.uint8)
+            for c in range(3):
+                band = rgb[..., c].astype(np.float32)
+                finite_mask = np.isfinite(band)
+                if not np.any(finite_mask):
+                    stretched[..., c] = 0
+                    continue
+                valid_vals = band[finite_mask]
+                p2, p98 = float(np.percentile(valid_vals, 2)), float(np.percentile(valid_vals, 98))
+                if p98 > p2:
+                    band = np.clip((band - p2) / (p98 - p2), 0.0, 1.0) * 255.0
+                else:
+                    b_min, b_max = float(valid_vals.min()), float(valid_vals.max())
+                    if b_max > b_min:
+                        band = np.clip((band - b_min) / (b_max - b_min), 0.0, 1.0) * 255.0
+                    else:
+                        band = np.zeros_like(band)
+                stretched[..., c] = np.nan_to_num(band, nan=0.0).astype(np.uint8)
+            rgb = stretched
 
         metadata.width = ds.width
         metadata.height = ds.height
-        metadata.channels = bands_to_read
+        metadata.channels = 3
 
         if ds.crs is not None:
             metadata.is_georef = True
@@ -75,7 +95,30 @@ def _read_geotiff(file_bytes: bytes, metadata: ImageMetadata) -> tuple:
                 "left": ds.bounds.left, "bottom": ds.bounds.bottom,
                 "right": ds.bounds.right, "top": ds.bounds.top
             }
-            metadata.gsd = abs(t.a)
+            # Calculate pixel resolution from affine transform (handles rotated/sheared rasters)
+            pixel_res = float(np.hypot(t.a, t.d))
+            if pixel_res < 1e-9:
+                pixel_res = float(abs(t.a)) if abs(t.a) > 1e-9 else float(abs(t.e))
+
+            # Detect geographic CRS (degrees) and convert GSD to meters
+            is_geographic = False
+            try:
+                is_geographic = bool(ds.crs.is_geographic)
+            except Exception:
+                if "4326" in str(ds.crs) or pixel_res < 0.01:
+                    is_geographic = True
+
+            if not is_geographic and pixel_res < 0.01:
+                is_geographic = True
+
+            if is_geographic:
+                center_lat = (ds.bounds.bottom + ds.bounds.top) / 2.0
+                center_lat = float(np.clip(center_lat, -85.0, 85.0))
+                meters_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat))
+                metadata.gsd = float(pixel_res * meters_per_deg_lon)
+            else:
+                metadata.gsd = float(pixel_res)
+
             log.info("GeoTIFF loaded", crs=metadata.crs, gsd=metadata.gsd)
         else:
             metadata.is_georef = False

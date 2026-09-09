@@ -66,6 +66,13 @@ def build_mesh_data(
     dsm_color_image.save(dsm_buf, format='PNG')
     dsm_colorized_b64 = base64.b64encode(dsm_buf.getvalue()).decode()
 
+    # === Tangent-space normal map for WebGL relief shading ===
+    normal_map = compute_normal_map(dsm_decimated, pixel_size=pixel_size)
+    norm_image = Image.fromarray(normal_map)
+    norm_buf = io.BytesIO()
+    norm_image.save(norm_buf, format='PNG')
+    normal_map_b64 = base64.b64encode(norm_buf.getvalue()).decode()
+
     # === Mesh stats ===
     num_vertices = dH * dW
     num_triangles = 2 * (dH - 1) * (dW - 1)
@@ -88,9 +95,10 @@ def build_mesh_data(
     return {
         "heightmap_b64": heightmap_b64,
         "rgb_b64": rgb_b64,
+        "normal_map_b64": normal_map_b64,
         "dsm_colorized_b64": dsm_colorized_b64,
         "mesh_stats": stats,
-        "dsm_raw": dsm.tolist(),  # Full resolution DSM for cross-section tool
+        "dsm_raw": np.round(dsm_decimated, 2).tolist(),  # Efficient grid for cross-section & flood analysis
     }
 
 
@@ -119,3 +127,27 @@ def apply_turbo_colormap(values: np.ndarray) -> np.ndarray:
     indices = (flat * 255).astype(np.uint8)
     colorized = lut[indices].reshape(H, W, 3)
     return colorized
+
+
+def compute_normal_map(dsm: np.ndarray, pixel_size: float = 1.0, vertical_scale: float = 1.0) -> np.ndarray:
+    """
+    Compute tangent-space normal map from DSM elevation grid.
+    Returns (H, W, 3) uint8 RGB array where normal (0, 0, 1) -> (128, 128, 255).
+    """
+    safe_pixel = max(float(pixel_size), 0.01)
+    gy, gx = np.gradient(dsm, safe_pixel, safe_pixel)
+    nx = -gx * vertical_scale
+    ny = gy * vertical_scale
+    nz = np.ones_like(dsm)
+
+    norm = np.sqrt(nx ** 2 + ny ** 2 + nz ** 2)
+    norm = np.maximum(norm, 1e-8)
+    nx /= norm
+    ny /= norm
+    nz /= norm
+
+    r = ((nx * 0.5 + 0.5) * 255.0).astype(np.uint8)
+    g = ((ny * 0.5 + 0.5) * 255.0).astype(np.uint8)
+    b = ((nz * 0.5 + 0.5) * 255.0).astype(np.uint8)
+
+    return np.dstack([r, g, b])
