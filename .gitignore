@@ -1,12 +1,14 @@
 __pycache__/
 *.pyc
 .env
+.venv/
 node_modules/
 dist/
 *.egg-info/
 backend/weights/*.pth
 backend/logs/*.jsonl
 backend/exports/
+backend/data/
 .vite/
 *.npy
 .DS_Store
