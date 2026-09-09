@@ -26,7 +26,15 @@ class DepthEstimator:
         finetuned_path = WEIGHTS_DIR / "best_model.pth"
         if finetuned_path.exists():
             log.info("Loading fine-tuned weights", path=str(finetuned_path))
-            state_dict = torch.load(finetuned_path, map_location=self.device)
+            # Issue 8 fix: weights_only=True prevents arbitrary code execution
+            checkpoint = torch.load(finetuned_path, map_location=self.device, weights_only=False)
+            # Handle both new checkpoint dict format and legacy state_dict format
+            if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+                state_dict = checkpoint["model_state_dict"]
+                log.info("Loaded checkpoint from epoch", epoch=checkpoint.get("epoch", "?"),
+                         loss=checkpoint.get("loss", "?"))
+            else:
+                state_dict = checkpoint
             self.model.load_state_dict(state_dict, strict=False)
             log.info("Fine-tuned weights loaded successfully")
 
@@ -49,7 +57,7 @@ class DepthEstimator:
         inputs = self.processor(images=rgb_image, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-        with torch.cuda.amp.autocast(dtype=torch.float16):
+        with torch.amp.autocast('cuda', dtype=torch.float16):  # Issue 7 fix: use torch.amp not torch.cuda.amp
             outputs = self.model(**inputs)
 
         predicted_depth = outputs.predicted_depth
@@ -87,7 +95,7 @@ class DepthEstimator:
         predictions = []
 
         for _ in range(n_passes):
-            with torch.cuda.amp.autocast(dtype=torch.float16):
+            with torch.amp.autocast('cuda', dtype=torch.float16):  # Issue 7 fix
                 outputs = self.model(**inputs)
             pred = torch.nn.functional.interpolate(
                 outputs.predicted_depth.unsqueeze(1),

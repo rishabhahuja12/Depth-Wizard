@@ -1,11 +1,18 @@
-"""PyTorch Dataset wrapping HuggingFace earthflow/GAMUS HDF5 files."""
+"""PyTorch Dataset wrapping HuggingFace earthflow/GAMUS HDF5 files.
+
+Fixes applied:
+- Bug 1 fixed: Synchronized spatial augmentations (flip/rotate applied identically to RGB + depth)
+- Issue 6 fixed: Shuffled tile selection for geographic diversity
+"""
 import os
+import random
 from pathlib import Path
 import h5py
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as T
+import torchvision.transforms.functional as TF
 from PIL import Image
 from huggingface_hub import hf_hub_download, list_repo_files
 
@@ -24,6 +31,10 @@ class GAMUSDataset(Dataset):
         prefix_agl = f"heights/{split}/"
         
         rgb_files = sorted([f for f in all_files if f.startswith(prefix_rgb) and f.endswith("_RGB.h5")])
+        
+        # Shuffle tiles for geographic diversity (fixed seed for reproducibility)
+        rng = random.Random(42)
+        rng.shuffle(rgb_files)
         
         # Each 1024x1024 tile yields 4 non-overlapping 512x512 patches
         num_tiles_needed = int(np.ceil(max_samples / 4))
@@ -76,13 +87,9 @@ class GAMUSDataset(Dataset):
 
         print(f"Loaded {len(self.samples)} valid 512x512 patches from GAMUS.")
 
-        self.rgb_transform = T.Compose([
-            T.ToPILImage(),
-            T.RandomHorizontalFlip(p=0.5),
-            T.ColorJitter(brightness=0.1, contrast=0.1),
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
+        # Color-only transforms applied to RGB only (no spatial ops here)
+        self.color_jitter = T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05)
+        self.normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
     def __len__(self):
         return len(self.samples)
@@ -90,12 +97,36 @@ class GAMUSDataset(Dataset):
     def __getitem__(self, idx):
         rgb_patch, agl_patch = self.samples[idx]
 
-        rgb_tensor = self.rgb_transform(rgb_patch)
-        
+        # Convert to PIL for transforms
+        rgb_pil = Image.fromarray(rgb_patch)
+
         # Clean depth patch (replace NaN with 0, clamp positive)
         agl_clean = np.nan_to_num(agl_patch, nan=0.0, posinf=100.0, neginf=0.0)
         agl_clean = np.maximum(agl_clean, 0.0).astype(np.float32)
-        
-        depth_tensor = torch.from_numpy(agl_clean)
+        agl_tensor = torch.from_numpy(agl_clean)
 
-        return rgb_tensor, depth_tensor
+        # --- Bug 1 FIX: Synchronized spatial augmentations ---
+        # Apply identical spatial transforms to BOTH rgb and depth
+        if random.random() > 0.5:
+            rgb_pil = TF.hflip(rgb_pil)
+            agl_tensor = torch.flip(agl_tensor, dims=[-1])  # flip width
+
+        if random.random() > 0.5:
+            rgb_pil = TF.vflip(rgb_pil)
+            agl_tensor = torch.flip(agl_tensor, dims=[-2])  # flip height
+
+        # Random 90-degree rotation (0, 90, 180, 270)
+        k = random.randint(0, 3)
+        if k > 0:
+            rgb_pil = TF.rotate(rgb_pil, angle=k * 90, expand=False)
+            agl_tensor = torch.rot90(agl_tensor, k=k, dims=[-2, -1])
+
+        # Color jitter on RGB only (depth is unaffected by color changes)
+        rgb_pil = self.color_jitter(rgb_pil)
+
+        # Convert RGB to tensor and normalize
+        rgb_tensor = TF.to_tensor(rgb_pil)  # [C, H, W] float32 in [0, 1]
+        rgb_tensor = self.normalize(rgb_tensor)
+
+        return rgb_tensor, agl_tensor
+

@@ -16,7 +16,8 @@ class SILogLoss(nn.Module):
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         valid = target > self.eps
         if valid.sum() < 10:
-            return torch.tensor(0.0, device=pred.device, requires_grad=True)
+            # Issue 5 fix: preserve gradient connectivity (don't return a detached leaf tensor)
+            return pred.sum() * 0.0
 
         pred_valid = pred[valid].clamp(min=self.eps)
         target_valid = target[valid]
