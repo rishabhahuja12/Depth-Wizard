@@ -90,12 +90,15 @@ function Terrain({
     };
   }, [geometry]);
 
+  const isRelative = meshStats.elevation_range <= 2.0;
+
   // WebGL shader uniforms for dynamic 3D contour lines
   const uniformsRef = useRef({
     uShowContours: { value: showContours ? 1.0 : 0.0 },
     uContourInterval: { value: contourInterval },
     uElevationMin: { value: meshStats.elevation_min },
     uVerticalScale: { value: verticalScale },
+    uIsRelative: { value: isRelative ? 1.0 : 0.0 },
   });
 
   useEffect(() => {
@@ -103,7 +106,8 @@ function Terrain({
     uniformsRef.current.uContourInterval.value = contourInterval;
     uniformsRef.current.uElevationMin.value = meshStats.elevation_min;
     uniformsRef.current.uVerticalScale.value = verticalScale;
-  }, [showContours, contourInterval, meshStats.elevation_min, verticalScale]);
+    uniformsRef.current.uIsRelative.value = isRelative ? 1.0 : 0.0;
+  }, [showContours, contourInterval, meshStats.elevation_min, verticalScale, isRelative]);
 
   const onBeforeCompile = useMemo(() => {
     return (shader: THREE.WebGLProgramParametersWithUniforms) => {
@@ -111,6 +115,7 @@ function Terrain({
       shader.uniforms.uContourInterval = uniformsRef.current.uContourInterval;
       shader.uniforms.uElevationMin = uniformsRef.current.uElevationMin;
       shader.uniforms.uVerticalScale = uniformsRef.current.uVerticalScale;
+      shader.uniforms.uIsRelative = uniformsRef.current.uIsRelative;
 
       shader.vertexShader = `
         varying vec3 vTerrainWorldPos;
@@ -129,13 +134,14 @@ function Terrain({
         uniform float uContourInterval;
         uniform float uElevationMin;
         uniform float uVerticalScale;
+        uniform float uIsRelative;
         ${shader.fragmentShader}
       `.replace(
         '#include <dithering_fragment>',
         `
         #include <dithering_fragment>
         if (uShowContours > 0.5 && uContourInterval > 0.01) {
-          float vScale = max(uVerticalScale * 0.1, 0.0001);
+          float vScale = uIsRelative > 0.5 ? max(16.0 * uVerticalScale, 0.0001) : max(uVerticalScale * 0.1, 0.0001);
           float elev = uElevationMin + (vTerrainWorldPos.y / vScale);
           float cInt = max(uContourInterval, 0.01);
           float numIntervals = elev / cInt;
@@ -159,7 +165,16 @@ function Terrain({
 
   if (!heightTex || !colorTex) return null;
 
-  const displacementScale = meshStats.elevation_range * verticalScale * 0.1;
+  // In metric mode: 1 meter elevation corresponds to 0.1 Three.js world units.
+  // In relative mode: elevation span is [0, 1]. To produce rich, visible 3D urban relief on a 51.2-wide plane,
+  // we scale the normalized [0, 1] relative depth to 18.0 world units (comparable to 180m metric relief).
+  const displacementScale = isRelative
+    ? 18.0 * verticalScale
+    : meshStats.elevation_range * verticalScale * 0.1;
+
+  const verticalFactor = isRelative
+    ? 18.0 * verticalScale
+    : verticalScale * 0.1;
 
   return (
     <>
@@ -171,7 +186,7 @@ function Terrain({
           displacementScale={displacementScale}
           displacementBias={0}
           normalMap={normalTex || undefined}
-          normalScale={new THREE.Vector2(1.2, 1.2)}
+          normalScale={isRelative ? new THREE.Vector2(2.0, 2.0) : new THREE.Vector2(1.2, 1.2)}
           side={THREE.DoubleSide}
           roughness={0.7}
           metalness={0.1}
@@ -184,7 +199,7 @@ function Terrain({
       {waterLevel > meshStats.elevation_min && (
         <mesh
           rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, (waterLevel - meshStats.elevation_min) * verticalScale * 0.1, 0]}
+          position={[0, (waterLevel - meshStats.elevation_min) * verticalFactor, 0]}
         >
           <planeGeometry args={[meshStats.width * 0.12, meshStats.height * 0.12]} />
           <meshStandardMaterial

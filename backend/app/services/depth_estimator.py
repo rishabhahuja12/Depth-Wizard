@@ -53,6 +53,9 @@ class DepthEstimator:
         Returns:
             depth: np.ndarray of shape (H, W), float32 in [0, 1]
         """
+        if isinstance(rgb_image, np.ndarray):
+            rgb_image = Image.fromarray(rgb_image)
+
         original_size = rgb_image.size  # (W, H)
 
         inputs = self.processor(images=rgb_image, return_tensors="pt")
@@ -78,12 +81,13 @@ class DepthEstimator:
 
         depth = prediction.cpu().numpy().astype(np.float32)
 
-        # Normalize to [0, 1]
-        d_min, d_max = depth.min(), depth.max()
-        if d_max - d_min > 1e-8:
-            depth = (depth - d_min) / (d_max - d_min)
+        # Robust normalization against outlier artifacts (0.5th to 99.5th percentile)
+        p_low, p_high = np.percentile(depth, [0.5, 99.5])
+        if p_high - p_low > 1e-6:
+            depth = np.clip((depth - p_low) / (p_high - p_low), 0.0, 1.0)
         else:
-            depth = np.zeros_like(depth)
+            d_min, d_max = depth.min(), depth.max()
+            depth = (depth - d_min) / (d_max - d_min + 1e-8) if d_max > d_min else np.zeros_like(depth)
 
         return depth
 
@@ -121,10 +125,13 @@ class DepthEstimator:
         mean_depth = stacked.mean(dim=0).cpu().numpy().astype(np.float32)
         variance = stacked.var(dim=0).cpu().numpy().astype(np.float32)
 
-        # Normalize mean depth to [0, 1]
-        d_min, d_max = mean_depth.min(), mean_depth.max()
-        if d_max - d_min > 1e-8:
-            mean_depth = (mean_depth - d_min) / (d_max - d_min)
+        # Robust normalization for mean depth
+        p_low, p_high = np.percentile(mean_depth, [0.5, 99.5])
+        if p_high - p_low > 1e-6:
+            mean_depth = np.clip((mean_depth - p_low) / (p_high - p_low), 0.0, 1.0)
+        else:
+            d_min, d_max = mean_depth.min(), mean_depth.max()
+            mean_depth = (mean_depth - d_min) / (d_max - d_min + 1e-8) if d_max > d_min else np.zeros_like(mean_depth)
 
         # Confidence = 1 - normalized variance
         v_max = variance.max()
