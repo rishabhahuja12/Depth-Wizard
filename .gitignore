@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.env
+node_modules/
+dist/
+*.egg-info/
+backend/weights/*.pth
+backend/logs/*.jsonl
+backend/exports/
+.vite/
+*.npy
+.DS_Store
