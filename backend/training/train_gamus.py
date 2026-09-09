@@ -49,9 +49,7 @@ def train():
     dataset = GAMUSDataset(split="train", max_samples=TRAIN_SAMPLES)
     loader = DataLoader(
         dataset, batch_size=TRAIN_BATCH_SIZE, shuffle=True,
-        num_workers=2,   # Issue 10 fix: data is in-memory; workers speed up transforms
-        pin_memory=True, drop_last=True,
-        persistent_workers=True,
+        num_workers=0, pin_memory=True, drop_last=True
     )
 
     # 2. Model
@@ -147,7 +145,7 @@ def train():
         lr_h = optimizer.param_groups[1]["lr"]
 
         print(f"Epoch [{epoch:02d}/{TRAIN_EPOCHS}] Loss: {avg_loss:.4f}  "
-              f"LR backbone={lr_b:.2e} head={lr_h:.2e}  Time: {elapsed:.1f}s")
+              f"LR backbone={lr_b:.2e} head={lr_h:.2e}  Time: {elapsed:.1f}s", flush=True)
 
         # Save best checkpoint (includes optimizer state for resumability)
         if avg_loss < best_loss:
@@ -159,7 +157,7 @@ def train():
                 "scaler_state_dict": scaler.state_dict(),
                 "loss": best_loss,
             }, WEIGHTS_DIR / "best_model.pth")
-            print(f"  -> Best model updated (loss: {best_loss:.4f})")
+            print(f"  -> Best model updated (loss: {best_loss:.4f})", flush=True)
 
     # Save final weights-only file (for inference loading)
     torch.save(model.state_dict(), WEIGHTS_DIR / "final_model.pth")
