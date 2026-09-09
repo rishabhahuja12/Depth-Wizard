@@ -60,7 +60,7 @@ export default function App() {
         </header>
 
         {/* Dropzone Hero */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto w-full p-4 sm:p-8">
           <Dropzone onFileSelected={handleFileSelected} loading={loading} progress={progress} />
         </div>
 

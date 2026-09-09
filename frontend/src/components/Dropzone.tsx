@@ -65,7 +65,7 @@ export default function Dropzone({ onFileSelected, loading, progress }: Dropzone
   };
 
   return (
-    <div className="flex flex-col items-center justify-center h-full max-w-4xl mx-auto px-4 py-8">
+    <div className="w-full max-w-3xl mx-auto">
       {/* Neo-Brutalist Main Upload Card */}
       <div className="w-full bg-[#1A1D24] border-4 border-black shadow-[10px_10px_0px_0px_#000000]">
         {/* Card Header */}
