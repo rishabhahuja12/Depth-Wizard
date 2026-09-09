@@ -69,10 +69,14 @@ class GradientMatchingLoss(nn.Module):
             pred = pred.unsqueeze(1)
             target = target.unsqueeze(1)
 
-        pred_dx = F.conv2d(pred, self.sobel_x, padding=1)
-        pred_dy = F.conv2d(pred, self.sobel_y, padding=1)
-        target_dx = F.conv2d(target, self.sobel_x, padding=1)
-        target_dy = F.conv2d(target, self.sobel_y, padding=1)
+        target = target.to(dtype=pred.dtype)
+        sobel_x = self.sobel_x.to(dtype=pred.dtype)
+        sobel_y = self.sobel_y.to(dtype=pred.dtype)
+
+        pred_dx = F.conv2d(pred, sobel_x, padding=1)
+        pred_dy = F.conv2d(pred, sobel_y, padding=1)
+        target_dx = F.conv2d(target, sobel_x, padding=1)
+        target_dy = F.conv2d(target, sobel_y, padding=1)
 
         return (pred_dx - target_dx).abs().mean() + (pred_dy - target_dy).abs().mean()
 
