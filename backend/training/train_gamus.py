@@ -1,26 +1,28 @@
 """
 DepthWizard MVP Training Script.
-Fine-tunes Depth Anything V2 ViT-S on 200 GAMUS samples.
-Expected time: ~2 minutes on RTX 4060.
+Fine-tunes Depth Anything V2 ViT-S on GAMUS dataset.
+Optimized for NVIDIA GeForce RTX 4060.
 """
 import sys
-sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent))
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import torch
-import torch.nn as nn
-from torch.cuda.amp import autocast, GradScaler
-from torch.utils.data import DataLoader
 import time
 import json
-from pathlib import Path
+import torch
+import torch.nn as nn
+from torch.amp import autocast, GradScaler
+from torch.utils.data import DataLoader
 from transformers import AutoModelForDepthEstimation
 
 from training.losses import CombinedLoss
 from training.dataset_gamus import GAMUSDataset
 from app.config import (
     MODEL_ID, WEIGHTS_DIR, LOGS_DIR,
-    TRAIN_SAMPLES, TRAIN_EPOCHS, TRAIN_BATCH_SIZE, TRAIN_LR
+    TRAIN_EPOCHS, TRAIN_BATCH_SIZE, TRAIN_LR
 )
+
+MVP_SAMPLES = 40
 
 
 def train():
@@ -32,10 +34,10 @@ def train():
     print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
     # 1. Dataset
-    dataset = GAMUSDataset(split="train", max_samples=TRAIN_SAMPLES)
+    dataset = GAMUSDataset(split="train", max_samples=MVP_SAMPLES)
     loader = DataLoader(
         dataset, batch_size=TRAIN_BATCH_SIZE, shuffle=True,
-        num_workers=4, pin_memory=True, drop_last=True
+        num_workers=0, pin_memory=True, drop_last=True
     )
 
     # 2. Model
@@ -47,7 +49,7 @@ def train():
     # 3. Optimizer & Scheduler
     optimizer = torch.optim.AdamW(model.parameters(), lr=TRAIN_LR, weight_decay=0.01)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=TRAIN_EPOCHS)
-    scaler = GradScaler()
+    scaler = GradScaler('cuda')
     criterion = CombinedLoss(alpha=0.5).to(device)
 
     # 4. Logging
@@ -70,7 +72,7 @@ def train():
 
             optimizer.zero_grad(set_to_none=True)
 
-            with autocast(dtype=torch.float16):
+            with autocast('cuda', dtype=torch.float16):
                 outputs = model(pixel_values=images)
                 pred = outputs.predicted_depth
 
@@ -81,7 +83,7 @@ def train():
                         mode="bilinear", align_corners=False
                     ).squeeze(1)
 
-                # Normalize pred to similar range as target
+                # Normalize pred to similar scale as target
                 pred_norm = (pred - pred.min()) / (pred.max() - pred.min() + 1e-8)
                 target_norm = (targets - targets.min()) / (targets.max() - targets.min() + 1e-8)
 
@@ -93,7 +95,6 @@ def train():
 
             epoch_loss += loss.item()
 
-            # Log every batch
             log_entry = {
                 "epoch": epoch, "batch": batch_idx,
                 "loss": round(loss.item(), 5),
@@ -103,22 +104,16 @@ def train():
                 f.write(json.dumps(log_entry) + "\n")
 
         scheduler.step()
-        avg_loss = epoch_loss / len(loader)
+        avg_loss = epoch_loss / max(len(loader), 1)
         elapsed = time.time() - t0
 
         print(f"Epoch [{epoch:02d}/{TRAIN_EPOCHS}] Loss: {avg_loss:.4f} Time: {elapsed:.1f}s")
 
-        # Save checkpoint at epoch 5 and 10
-        if epoch % 5 == 0:
-            ckpt_path = WEIGHTS_DIR / f"checkpoint_epoch_{epoch}.pth"
-            torch.save(model.state_dict(), ckpt_path)
-            print(f"  → Checkpoint saved: {ckpt_path}")
-
-        # Save best
+        # Save best checkpoint
         if avg_loss < best_loss:
             best_loss = avg_loss
             torch.save(model.state_dict(), WEIGHTS_DIR / "best_model.pth")
-            print(f"  → Best model updated (loss: {best_loss:.4f})")
+            print(f"  -> Best model updated (loss: {best_loss:.4f})")
 
     # Save final
     torch.save(model.state_dict(), WEIGHTS_DIR / "final_model.pth")
@@ -127,7 +122,7 @@ def train():
     print(f"\n{'='*50}")
     print(f"Training complete in {total_time:.1f} minutes")
     print(f"Best loss: {best_loss:.4f}")
-    print(f"Weights saved to: {WEIGHTS_DIR}")
+    print(f"Weights saved to: {WEIGHTS_DIR / 'best_model.pth'}")
     print(f"Logs saved to: {log_file}")
 
 
