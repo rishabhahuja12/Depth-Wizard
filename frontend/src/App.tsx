@@ -3,6 +3,8 @@ import { useInference } from './hooks/useInference';
 import Dropzone from './components/Dropzone';
 import DualViewer from './components/DualViewer';
 import TerrainCanvas from './components/TerrainCanvas';
+import VoxelTerrain from './components/VoxelTerrain';
+import Minimap from './components/Minimap';
 import FloodSimulator from './components/FloodSimulator';
 import CrossSection from './components/CrossSection';
 import SettingsPanel from './components/SettingsPanel';
@@ -29,6 +31,9 @@ export default function App() {
   const [waterLevel, setWaterLevel] = useState(0);
   const [showContours, setShowContours] = useState(false);
   const [contourInterval, setContourInterval] = useState(5);
+  const [renderMode, setRenderMode] = useState<'voxel' | 'smooth'>('voxel');
+  const [voxelBands, setVoxelBands] = useState<number>(8);
+  const [voxelResolution, setVoxelResolution] = useState<number>(64);
   const [activeTab, setActiveTab] = useState<'surface' | 'flood' | 'profile' | 'inspect'>('surface');
   const [exporting, setExporting] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
@@ -203,19 +208,46 @@ export default function App() {
 
       {/* Main Studio Viewport */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* 3D WebGL Flythrough Canvas */}
+        {/* 3D WebGL Main Viewport */}
         <div className="flex-1 relative h-full">
-          <TerrainCanvas
-            heightmapB64={data.heightmap_b64}
-            rgbB64={data.rgb_b64}
-            normalMapB64={data.normal_map_b64}
-            meshStats={data.mesh_stats}
-            verticalScale={verticalScale}
-            waterLevel={waterLevel}
-            showContours={showContours}
-            contourInterval={contourInterval}
-            dsmRaw={data.dsm_raw}
-          />
+          {renderMode === 'voxel' ? (
+            <VoxelTerrain
+              dsmRaw={data.dsm_raw}
+              meshStats={data.mesh_stats}
+              verticalScale={verticalScale}
+              waterLevel={waterLevel}
+              targetResolution={voxelResolution}
+              bandCount={voxelBands}
+            />
+          ) : (
+            <TerrainCanvas
+              heightmapB64={data.heightmap_b64}
+              rgbB64={data.rgb_b64}
+              normalMapB64={data.normal_map_b64}
+              meshStats={data.mesh_stats}
+              verticalScale={verticalScale}
+              waterLevel={waterLevel}
+              showContours={showContours}
+              contourInterval={contourInterval}
+              dsmRaw={data.dsm_raw}
+            />
+          )}
+
+          {/* Smooth Mesh Minimap Overlay (§3.6) */}
+          {renderMode === 'voxel' && (
+            <div className="absolute top-4 right-4 z-20">
+              <Minimap
+                heightmapB64={data.heightmap_b64}
+                rgbB64={data.rgb_b64}
+                normalMapB64={data.normal_map_b64}
+                meshStats={data.mesh_stats}
+                verticalScale={verticalScale}
+                waterLevel={waterLevel}
+                showContours={false}
+                dsmRaw={data.dsm_raw}
+              />
+            </div>
+          )}
 
           {/* Floating Elevation Bar */}
           <div className="absolute top-4 left-4 z-10">

@@ -18,6 +18,7 @@ interface TerrainCanvasProps {
   showContours: boolean;
   contourInterval?: number;
   dsmRaw: number[][];
+  interactive?: boolean;
 }
 
 function Terrain({
@@ -357,7 +358,17 @@ function CameraController() {
   return null;
 }
 
-export default function TerrainCanvas(props: TerrainCanvasProps) {
+function MinimapCameraController() {
+  const { camera } = useThree();
+  useEffect(() => {
+    camera.position.set(0, 45, 45);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+  }, [camera]);
+  return null;
+}
+
+export default function TerrainCanvas({ interactive = true, ...props }: TerrainCanvasProps) {
   return (
     <div className="w-full h-full relative select-none">
       <Canvas
@@ -371,13 +382,14 @@ export default function TerrainCanvas(props: TerrainCanvasProps) {
         <directionalLight position={[-30, 40, -30]} intensity={0.3} />
 
         <Terrain {...props} />
-        <CameraController />
+        {interactive ? <CameraController /> : <MinimapCameraController />}
 
         <gridHelper args={[200, 50, '#1e293b', '#1e293b']} position={[0, -0.1, 0]} />
       </Canvas>
 
       {/* Architectural Flight Telemetry HUD */}
-      <div className="absolute bottom-4 left-4 p-3 pointer-events-none bg-black/90 backdrop-blur-md border border-white/15 text-xs font-mono space-y-2">
+      {interactive && (
+        <div className="absolute bottom-4 left-4 p-3 pointer-events-none bg-black/90 backdrop-blur-md border border-white/15 text-xs font-mono space-y-2">
         <div className="flex items-center gap-2">
           <span className="w-1.5 h-1.5 bg-[#38BDF8]" />
           <span className="text-[10px] font-mono font-bold text-white tracking-widest uppercase">
@@ -401,6 +413,7 @@ export default function TerrainCanvas(props: TerrainCanvasProps) {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
