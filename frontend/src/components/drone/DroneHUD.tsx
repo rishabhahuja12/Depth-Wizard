@@ -1,5 +1,5 @@
 import React from 'react';
-import { Crosshair, LogOut, Compass, Gauge, ArrowUp, Activity } from 'lucide-react';
+import { Crosshair, LogOut, Compass, Gauge, ArrowUp, Activity, AlertTriangle, Radar } from 'lucide-react';
 
 export interface DroneHUDProps {
   onExitFpv: () => void;
@@ -16,9 +16,9 @@ export interface DroneHUDProps {
 }
 
 /**
- * DroneHUD (Phase 2):
+ * DroneHUD:
  * 2D FPV OSD overlay with live telemetry, artificial horizon ladder,
- * heading indicator, speed gauge, and exit controls.
+ * heading indicator, speed gauge, 3-sensor LIDAR cluster, and terrain alerts.
  */
 export default function DroneHUD({
   onExitFpv,
@@ -28,6 +28,9 @@ export default function DroneHUD({
   heading = 0,
   pitch = 0,
   roll = 0,
+  sensorLeft = 50,
+  sensorRight = 50,
+  sensorBottom = 50,
 }: DroneHUDProps) {
   const speedKmh = (speed * 3.6).toFixed(1);
   const speedMs = speed.toFixed(1);
@@ -165,6 +168,64 @@ export default function DroneHUD({
         <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">E</kbd> Descend</div>
         <div><kbd className="px-1 py-0.5 bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">SHIFT</kbd> Turbo 2.6×</div>
       </div>
+
+      {/* 7. 3-Sensor Proximity LIDAR Array Cluster (§5) */}
+      <div className="absolute bottom-4 right-6 flex items-center gap-2 p-2.5 bg-black/85 border border-white/15 backdrop-blur-md text-xs shadow-2xl">
+        <div className="flex items-center gap-1.5 text-[10px] text-neutral-400 font-bold tracking-wider px-1">
+          <Radar className="w-3.5 h-3.5 text-[#38BDF8]" />
+          LIDAR:
+        </div>
+
+        {/* Left Sensor */}
+        <div
+          className={`px-2.5 py-1 border font-bold flex items-center gap-1.5 transition-colors ${
+            sensorLeft < 3
+              ? 'bg-red-500/25 border-red-500 text-red-400 animate-pulse'
+              : sensorLeft <= 10
+              ? 'bg-amber-500/15 border-amber-500/60 text-amber-300'
+              : 'bg-black/60 border-emerald-500/40 text-emerald-400'
+          }`}
+        >
+          <span className="text-[9px] text-neutral-400">L:</span>
+          <span>{sensorLeft >= 50 ? '>50m' : `${sensorLeft.toFixed(1)}m`}</span>
+        </div>
+
+        {/* Down / AGL Sensor */}
+        <div
+          className={`px-2.5 py-1 border font-bold flex items-center gap-1.5 transition-colors ${
+            sensorBottom < 3
+              ? 'bg-red-500/25 border-red-500 text-red-400 animate-pulse'
+              : sensorBottom <= 10
+              ? 'bg-amber-500/15 border-amber-500/60 text-amber-300'
+              : 'bg-black/60 border-emerald-500/40 text-emerald-400'
+          }`}
+        >
+          <span className="text-[9px] text-neutral-400">AGL:</span>
+          <span>{sensorBottom >= 50 ? '>50m' : `${sensorBottom.toFixed(1)}m`}</span>
+        </div>
+
+        {/* Right Sensor */}
+        <div
+          className={`px-2.5 py-1 border font-bold flex items-center gap-1.5 transition-colors ${
+            sensorRight < 3
+              ? 'bg-red-500/25 border-red-500 text-red-400 animate-pulse'
+              : sensorRight <= 10
+              ? 'bg-amber-500/15 border-amber-500/60 text-amber-300'
+              : 'bg-black/60 border-emerald-500/40 text-emerald-400'
+          }`}
+        >
+          <span className="text-[9px] text-neutral-400">R:</span>
+          <span>{sensorRight >= 50 ? '>50m' : `${sensorRight.toFixed(1)}m`}</span>
+        </div>
+      </div>
+
+      {/* 8. Proximity Obstacle Warning Alert */}
+      {(sensorLeft < 3 || sensorRight < 3 || sensorBottom < 2) && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-red-500/25 border border-red-500 text-red-400 font-bold text-xs tracking-widest uppercase flex items-center gap-2 shadow-2xl animate-pulse">
+          <AlertTriangle className="w-4 h-4 text-red-400" />
+          <span>PROXIMITY WARNING - TERRAIN OBSTACLE CLOSE</span>
+        </div>
+      )}
     </div>
   );
 }

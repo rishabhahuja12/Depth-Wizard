@@ -63,6 +63,9 @@ export default function DroneFlightController({
   // Prop spin animation state for DroneModel
   const [propAngle, setPropAngle] = useState(0);
 
+  // Proximity sensor telemetry state for soft-bump response
+  const sensorReadingsRef = useRef<SensorReadings>({ left: 50, right: 50, bottom: 50 });
+
   // Compute initial safe spawn altitude above terrain surface
   const isRelative = (meshStats?.elevation_range ?? 0) <= 2.0;
   const maxElevWorld = isRelative
@@ -147,7 +150,22 @@ export default function DroneFlightController({
     const accel = thrustVec.clone().sub(velocity.current.clone().multiplyScalar(dragCoeff));
     velocity.current.add(accel.multiplyScalar(dt));
 
-    // 5. Phase 3: Terrain Clearance & Collision Resolution (§5)
+    // 5. Soft-bump velocity zeroing from proximity sensors (§5)
+    // If obstacle is closer than 1.5m, cancel velocity component towards obstacle
+    const sensors = sensorReadingsRef.current;
+    if (sensors.right < 1.5) {
+      const latSpeed = velocity.current.dot(rightVec);
+      if (latSpeed > 0) velocity.current.sub(rightVec.clone().multiplyScalar(latSpeed));
+    }
+    if (sensors.left < 1.5) {
+      const latSpeed = velocity.current.dot(rightVec);
+      if (latSpeed < 0) velocity.current.sub(rightVec.clone().multiplyScalar(latSpeed));
+    }
+    if (sensors.bottom < 1.5 && velocity.current.y < 0) {
+      velocity.current.y = 0;
+    }
+
+    // 6. Terrain Clearance & Collision Resolution (§5)
     const prevPos = droneGroupRef.current.position.clone();
     const candidatePos = prevPos.clone().add(velocity.current.clone().multiplyScalar(dt));
 
@@ -173,33 +191,33 @@ export default function DroneFlightController({
       collision.velocity.z
     );
 
-    // 6. Thrust-pitch coupling (§4): nose dips 5-15 deg under forward acceleration
+    // 7. Thrust-pitch coupling (§4): nose dips 5-15 deg under forward acceleration
     const forwardSpeed = velocity.current.dot(forwardVec);
     const lateralSpeed = velocity.current.dot(rightVec);
     const targetPitch = Math.max(-0.26, Math.min(0.18, -forwardSpeed * 0.012));
     pitch.current = THREE.MathUtils.lerp(pitch.current, targetPitch, 8 * dt);
 
-    // 7. Auto-bank roll into turns (§4): roll proportional to lateral velocity and yaw rate
+    // 8. Auto-bank roll into turns (§4): roll proportional to lateral velocity and yaw rate
     const targetRoll = Math.max(-0.45, Math.min(0.45, -lateralSpeed * 0.04 - yawRate * 0.12));
     roll.current = THREE.MathUtils.lerp(roll.current, targetRoll, 10 * dt);
 
     // Apply orientation in YXZ Euler order
     droneGroupRef.current.rotation.set(pitch.current, yaw.current, roll.current, 'YXZ');
 
-    // 8. Rigid nose-locked FPV camera: rigidly pinned to front nose pod
+    // 9. Rigid nose-locked FPV camera: rigidly pinned to front nose pod
     const noseOffset = new THREE.Vector3(0, 0.08, -0.38);
     noseOffset.applyQuaternion(droneGroupRef.current.quaternion);
     camera.position.copy(droneGroupRef.current.position).add(noseOffset);
     camera.quaternion.copy(droneGroupRef.current.quaternion);
 
-    // 9. Propeller spin speed tied to throttle magnitude (§4)
+    // 10. Propeller spin speed tied to throttle magnitude (§4)
     const currentSpeed = velocity.current.length();
     const hasThrustInput = input.pitchForward || input.pitchBackward || input.throttleUp || input.throttleDown || Math.abs(yawRate) > 0;
     const spinRate = (hasThrustInput ? (input.turbo ? 75 : 45) : 18) + currentSpeed * 0.7;
     propRotation.current += spinRate * dt;
     setPropAngle(propRotation.current);
 
-    // 10. Emit telemetry to HUD
+    // 11. Emit telemetry to HUD
     if (onTelemetryUpdate) {
       // Heading in degrees: 0 deg North (-Z), 90 deg East (+X), 180 deg South (+Z), 270 deg West (-X)
       let headingDeg = THREE.MathUtils.radToDeg(-yaw.current);
@@ -224,7 +242,11 @@ export default function DroneFlightController({
         heading: Math.round(headingDeg),
         pitch: THREE.MathUtils.radToDeg(pitch.current),
         roll: THREE.MathUtils.radToDeg(roll.current),
-        sensors: { left: 50, right: 50, bottom: aglMeters },
+        sensors: {
+          left: sensors.left,
+          right: sensors.right,
+          bottom: aglMeters,
+        },
       });
     }
   });
@@ -239,6 +261,11 @@ export default function DroneFlightController({
         droneRef={droneGroupRef}
         dsmRaw={dsmRaw}
         meshStats={meshStats}
+        verticalScale={verticalScale}
+        waterLevel={waterLevel}
+        onReadingsUpdate={(r) => {
+          sensorReadingsRef.current = r;
+        }}
       />
     </group>
   );

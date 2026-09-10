@@ -5,6 +5,7 @@ import {
   computeAgl,
   computeMsl,
   resolveTerrainCollision,
+  castSensor,
 } from './dsmSampling.ts';
 import type { MeshElevationStats } from './dsmSampling.ts';
 
@@ -176,3 +177,72 @@ test('resolveTerrainCollision prevents passing through vertical building walls',
   // Horizontal velocity must be damped
   assert.ok(result.velocity.x < 1.0, 'Horizontal velocity towards wall must be stopped/damped');
 });
+
+test('castSensor measures downward AGL distance accurately', () => {
+  const meshStats: MeshElevationStats = {
+    width: 100,
+    height: 100,
+    elevation_min: 0,
+    elevation_max: 100,
+    elevation_range: 100,
+  };
+
+  // Terrain at 2.0m world height
+  const dsmRaw = Array.from({ length: 4 }, () => Array(4).fill(20)); // worldY = 2.0
+
+  // Drone origin at (0, 10, 0), looking straight down
+  const origin = { x: 0, y: 10, z: 0 };
+  const dirWorld = { x: 0, y: -1, z: 0 };
+
+  const dist = castSensor(origin, dirWorld, dsmRaw, meshStats, 1.0);
+  // Expected distance = 10 - 2 = 8.0m
+  assert.ok(Math.abs(dist - 8.0) < 1e-3, `Expected downward distance 8.0, got ${dist}`);
+});
+
+test('castSensor detects obstacle wall at accurate distance', () => {
+  const meshStats: MeshElevationStats = {
+    width: 200, // worldW = 20 (-10 to +10)
+    height: 200,
+    elevation_min: 0,
+    elevation_max: 100,
+    elevation_range: 100,
+  };
+
+  // 10x10 grid:
+  // Cols 0-4 are ground level (0m)
+  // Cols 5-9 are a tall building (50m, worldY = 5.0)
+  // Boundary between col 4 and 5 is at X = 0
+  const dsmRaw = Array.from({ length: 10 }, () => [
+    0, 0, 0, 0, 0, 50, 50, 50, 50, 50,
+  ]);
+
+  // Drone is at X = -5 (cols 2-3 area, flat ground at 0m), altitude Y = 2.0m
+  // Sensor points right (+X) towards the building at X >= 0
+  const origin = { x: -5, y: 2.0, z: 0 };
+  const dirWorld = { x: 1, y: 0, z: 0 };
+
+  const dist = castSensor(origin, dirWorld, dsmRaw, meshStats, 1.0, undefined, 50, 0.5);
+  // The building wall is approximately 5m to the right
+  assert.ok(dist >= 4.0 && dist <= 6.0, `Expected wall detection around 5.0m, got ${dist}`);
+});
+
+test('castSensor returns maxRange when no obstacle intersects ray', () => {
+  const meshStats: MeshElevationStats = {
+    width: 100,
+    height: 100,
+    elevation_min: 0,
+    elevation_max: 100,
+    elevation_range: 100,
+  };
+
+  // Completely flat low ground (worldY = 0)
+  const dsmRaw = Array.from({ length: 4 }, () => Array(4).fill(0));
+
+  // Drone is at Y = 10m, ray points horizontally (+X)
+  const origin = { x: 0, y: 10, z: 0 };
+  const dirWorld = { x: 1, y: 0, z: 0 };
+
+  const dist = castSensor(origin, dirWorld, dsmRaw, meshStats, 1.0, undefined, 50, 0.5);
+  assert.equal(dist, 50, `Expected maxRange 50, got ${dist}`);
+});
+

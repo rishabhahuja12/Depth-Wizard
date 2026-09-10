@@ -218,3 +218,62 @@ export function resolveTerrainCollision(
     groundWorldY: targetGroundY,
   };
 }
+
+/**
+ * Shared by all proximity sensors (§5): steps outward in world space,
+ * sampling dsm_raw at each step, and reports the first distance where
+ * terrain height intersects the sensor ray altitude.
+ *
+ * @param origin World position of the sensor emitter
+ * @param dirWorld Normalized world direction of the sensor ray
+ * @param dsmRaw Row-major elevation grid
+ * @param meshStats DSM bounds
+ * @param verticalScale Exaggeration multiplier
+ * @param waterLevel Flood plane elevation
+ * @param maxRange Maximum sensing distance (default 50m)
+ * @param step Sampling step along ray (default 0.5m)
+ * @returns Hit distance in meters/world units (clamped to maxRange)
+ */
+export function castSensor(
+  origin: { x: number; y: number; z: number },
+  dirWorld: { x: number; y: number; z: number },
+  dsmRaw: number[][],
+  meshStats: MeshElevationStats,
+  verticalScale = 1.0,
+  waterLevel?: number,
+  maxRange = 50,
+  step = 0.5
+): number {
+  // If sensor is directed straight down (e.g. dirWorld.y <= -0.9)
+  if (dirWorld.y <= -0.9) {
+    const groundY = getTerrainElevationAt(
+      origin.x,
+      origin.z,
+      dsmRaw,
+      meshStats,
+      verticalScale,
+      waterLevel
+    );
+    const dist = origin.y - groundY;
+    return Math.max(0, Math.min(maxRange, dist));
+  }
+
+  for (let d = step; d <= maxRange; d += step) {
+    const x = origin.x + dirWorld.x * d;
+    const z = origin.z + dirWorld.z * d;
+    const rayY = origin.y + dirWorld.y * d;
+    const groundY = getTerrainElevationAt(
+      x,
+      z,
+      dsmRaw,
+      meshStats,
+      verticalScale,
+      waterLevel
+    );
+    if (groundY >= rayY - 0.2) {
+      return d;
+    }
+  }
+
+  return maxRange;
+}
