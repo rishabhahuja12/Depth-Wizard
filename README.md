@@ -29,15 +29,15 @@
 ## 🏗️ System Architecture & Mathematical Engine
 
 ```mermaid
-graph TD
+flowchart TD
     A["Raw Satellite Tile (GeoTIFF / PNG)"] --> B["FastAPI Backend Ingestion"]
     B --> C["Rasterio Metadata Extraction (CRS, GSD, Affine)"]
     B --> D["Depth Anything V2 ViT-S Backbone"]
     D --> E["Normalized Disparity / Depth Map"]
-    C --> F{"is_georef ?"}
-    F -->|Yes (GeoTIFF)| G["Metric Prior Calibration: DTM_base + α · nDSM (meters)"]
-    F -->|No (Standard RGB)| H["Relative Normalization: [0.0, 1.0] (relative)"]
-    G --> I["512×512 Decimated Heightfield Mesh"]
+    C --> F{"Is Georeferenced?"}
+    F -->|Yes - GeoTIFF| G["Metric Prior Calibration: DTM_base + alpha * nDSM (meters)"]
+    F -->|No - Standard RGB| H["Relative Normalization: 0.0 to 1.0 (relative)"]
+    G --> I["512x512 Decimated Heightfield Mesh"]
     H --> I
     I --> J["FastAPI JSON Telemetry & Float Array"]
     J --> K["Vite + React + Three.js 3D WebGL Canvas"]
