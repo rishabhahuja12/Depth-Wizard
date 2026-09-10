@@ -24,6 +24,7 @@ export interface FlightTelemetry {
   sensors: SensorReadings;
   autopilotMode: 'manual' | 'orbit' | 'transect';
   cameraGimbal: boolean;
+  cameraMode?: 'fpv' | 'tpp';
 }
 
 export interface DroneFlightControllerProps {
@@ -40,8 +41,10 @@ export interface DroneFlightControllerProps {
   waterLevel?: number;
   autopilotMode?: 'manual' | 'orbit' | 'transect';
   cameraGimbal?: boolean;
+  cameraMode?: 'fpv' | 'tpp';
   onAutopilotModeChange?: (mode: 'manual' | 'orbit' | 'transect') => void;
   onCameraGimbalToggle?: () => void;
+  onCameraModeChange?: (mode: 'fpv' | 'tpp') => void;
   onTelemetryUpdate?: (telemetry: FlightTelemetry) => void;
 }
 
@@ -60,8 +63,10 @@ export default function DroneFlightController({
   waterLevel,
   autopilotMode: controlledMode,
   cameraGimbal: controlledGimbal,
+  cameraMode = 'fpv',
   onAutopilotModeChange,
   onCameraGimbalToggle,
+  onCameraModeChange,
   onTelemetryUpdate,
 }: DroneFlightControllerProps) {
   const droneGroupRef = useRef<THREE.Group>(null);
@@ -369,22 +374,28 @@ export default function DroneFlightController({
         },
         autopilotMode: activeMode,
         cameraGimbal: isGimbal,
+        cameraMode,
       });
     }
   });
 
   return (
     <group ref={droneGroupRef}>
-      <DroneModel
-        throttle={velocity.current.length()}
-        propRotation={propAngle}
-      />
+      {/* Visual drone model only rendered in TPP chase view (§1.1 & §2) */}
+      {cameraMode === 'tpp' && (
+        <DroneModel
+          throttle={velocity.current.length()}
+          propRotation={propAngle}
+        />
+      )}
+      {/* Proximity sensors: raycast runs continuously, 3D laser visual lines only rendered in TPP (§1.2 & §2) */}
       <ProximitySensors
         droneRef={droneGroupRef}
         dsmRaw={dsmRaw}
         meshStats={meshStats}
         verticalScale={verticalScale}
         waterLevel={waterLevel}
+        showVisuals={cameraMode === 'tpp'}
         onReadingsUpdate={(r) => {
           sensorReadingsRef.current = r;
         }}

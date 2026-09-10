@@ -70,6 +70,10 @@ export default function DroneHUD({
   const speedKmh = (speed * 3.6).toFixed(1);
   const speedMs = speed.toFixed(1);
 
+  // Floating-point deadband clamping to eliminate micro-jitter near zero (§1.1)
+  const displayPitch = Math.abs(pitch) < 0.05 ? 0 : pitch;
+  const displayRoll = Math.abs(roll) < 0.05 ? 0 : roll;
+
   // Compass heading direction label
   const getHeadingLabel = (deg: number) => {
     const d = ((deg % 360) + 360) % 360;
@@ -272,18 +276,24 @@ export default function DroneHUD({
         </div>
       )}
 
-      {/* 2. Artificial Horizon & Center Pitch Ladder */}
+      {/* 2. Artificial Horizon & Center Pitch Ladder (§1.1: direct 60 FPS transform without transition jitter) */}
       <div
-        className="absolute inset-0 flex items-center justify-center transition-transform duration-75 ease-out"
+        className="absolute inset-0 flex items-center justify-center pointer-events-none"
         style={{
-          transform: `rotate(${-roll}deg) translateY(${pitch * 4}px)`,
+          transform: `rotate(${-displayRoll}deg) translateY(${displayPitch * 4}px)`,
         }}
       >
         <div className="relative w-80 h-80 flex items-center justify-center pointer-events-none">
-          {/* Horizon Line (0 deg pitch) with center gap */}
-          <div className="absolute w-64 flex items-center justify-between">
-            <div className="w-24 h-[1.5px] bg-emerald-400/80 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
-            <div className="w-24 h-[1.5px] bg-emerald-400/80 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
+          {/* Horizon Line (0 deg pitch) with center gap and bracketed ticks matching ladder (§1.1) */}
+          <div className="absolute w-44 flex items-center justify-between">
+            <div className="flex items-center">
+              <div className="w-2 h-1.5 border-l-2 border-t-2 border-emerald-400/90" />
+              <div className="w-14 h-[1.5px] bg-emerald-400/90 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
+            </div>
+            <div className="flex items-center">
+              <div className="w-14 h-[1.5px] bg-emerald-400/90 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
+              <div className="w-2 h-1.5 border-r-2 border-t-2 border-emerald-400/90" />
+            </div>
           </div>
 
           {/* +20 deg pitch rung */}

@@ -1,5 +1,5 @@
 import React, { useRef, useMemo, useEffect } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { castSensor, MeshElevationStats } from './dsmSampling.ts';
 
@@ -15,6 +15,7 @@ export interface ProximitySensorsProps {
   meshStats: MeshElevationStats;
   verticalScale?: number;
   waterLevel?: number;
+  showVisuals?: boolean;
   onReadingsUpdate?: (readings: SensorReadings) => void;
 }
 
@@ -35,8 +36,11 @@ export default function ProximitySensors({
   meshStats,
   verticalScale = 1.0,
   waterLevel,
+  showVisuals = false,
   onReadingsUpdate,
 }: ProximitySensorsProps) {
+  const { camera } = useThree();
+
   // Laser line geometries with dynamic 2-vertex buffer attributes
   const leftGeo = useMemo(() => {
     const geo = new THREE.BufferGeometry();
@@ -92,6 +96,12 @@ export default function ProximitySensors({
   const rightDotMatRef = useRef<THREE.MeshBasicMaterial>(null);
   const bottomDotMatRef = useRef<THREE.MeshBasicMaterial>(null);
 
+  // Guard against near-plane WebGL projection inversion
+  const isBehindCameraNearPlane = (pt: THREE.Vector3) => {
+    const pCam = pt.clone().applyMatrix4(camera.matrixWorldInverse);
+    return pCam.z >= -(camera.near + 0.05);
+  };
+
   useFrame(() => {
     if (!droneRef.current) return;
 
@@ -117,22 +127,28 @@ export default function ProximitySensors({
     const leftHit = leftOrigin.clone().add(leftDir.clone().multiplyScalar(leftDist));
 
     // Update Left Line Buffer
-    const leftPos = leftGeo.attributes.position as THREE.BufferAttribute;
-    const leftArr = leftPos.array as Float32Array;
-    leftArr[0] = leftOrigin.x;
-    leftArr[1] = leftOrigin.y;
-    leftArr[2] = leftOrigin.z;
-    leftArr[3] = leftHit.x;
-    leftArr[4] = leftHit.y;
-    leftArr[5] = leftHit.z;
-    leftPos.needsUpdate = true;
+    if (showVisuals) {
+      const leftPos = leftGeo.attributes.position as THREE.BufferAttribute;
+      const leftArr = leftPos.array as Float32Array;
+      leftArr[0] = leftOrigin.x;
+      leftArr[1] = leftOrigin.y;
+      leftArr[2] = leftOrigin.z;
+      leftArr[3] = leftHit.x;
+      leftArr[4] = leftHit.y;
+      leftArr[5] = leftHit.z;
+      leftPos.needsUpdate = true;
 
-    const leftColor = getSensorColor(leftDist);
-    (leftLine.material as THREE.LineBasicMaterial).color.copy(leftColor);
-    if (leftDotRef.current && leftDotMatRef.current) {
-      leftDotRef.current.position.copy(leftHit);
-      leftDotRef.current.visible = leftDist < 50;
-      leftDotMatRef.current.color.copy(leftColor);
+      const leftColor = getSensorColor(leftDist);
+      (leftLine.material as THREE.LineBasicMaterial).color.copy(leftColor);
+      leftLine.visible = !isBehindCameraNearPlane(leftOrigin) && !isBehindCameraNearPlane(leftHit);
+      if (leftDotRef.current && leftDotMatRef.current) {
+        leftDotRef.current.position.copy(leftHit);
+        leftDotRef.current.visible = leftDist < 50 && !isBehindCameraNearPlane(leftHit);
+        leftDotMatRef.current.color.copy(leftColor);
+      }
+    } else {
+      leftLine.visible = false;
+      if (leftDotRef.current) leftDotRef.current.visible = false;
     }
 
     // 2. Right Sensor (Starboard arm anchor)
@@ -154,22 +170,28 @@ export default function ProximitySensors({
     const rightHit = rightOrigin.clone().add(rightDir.clone().multiplyScalar(rightDist));
 
     // Update Right Line Buffer
-    const rightPos = rightGeo.attributes.position as THREE.BufferAttribute;
-    const rightArr = rightPos.array as Float32Array;
-    rightArr[0] = rightOrigin.x;
-    rightArr[1] = rightOrigin.y;
-    rightArr[2] = rightOrigin.z;
-    rightArr[3] = rightHit.x;
-    rightArr[4] = rightHit.y;
-    rightArr[5] = rightHit.z;
-    rightPos.needsUpdate = true;
+    if (showVisuals) {
+      const rightPos = rightGeo.attributes.position as THREE.BufferAttribute;
+      const rightArr = rightPos.array as Float32Array;
+      rightArr[0] = rightOrigin.x;
+      rightArr[1] = rightOrigin.y;
+      rightArr[2] = rightOrigin.z;
+      rightArr[3] = rightHit.x;
+      rightArr[4] = rightHit.y;
+      rightArr[5] = rightHit.z;
+      rightPos.needsUpdate = true;
 
-    const rightColor = getSensorColor(rightDist);
-    (rightLine.material as THREE.LineBasicMaterial).color.copy(rightColor);
-    if (rightDotRef.current && rightDotMatRef.current) {
-      rightDotRef.current.position.copy(rightHit);
-      rightDotRef.current.visible = rightDist < 50;
-      rightDotMatRef.current.color.copy(rightColor);
+      const rightColor = getSensorColor(rightDist);
+      (rightLine.material as THREE.LineBasicMaterial).color.copy(rightColor);
+      rightLine.visible = !isBehindCameraNearPlane(rightOrigin) && !isBehindCameraNearPlane(rightHit);
+      if (rightDotRef.current && rightDotMatRef.current) {
+        rightDotRef.current.position.copy(rightHit);
+        rightDotRef.current.visible = rightDist < 50 && !isBehindCameraNearPlane(rightHit);
+        rightDotMatRef.current.color.copy(rightColor);
+      }
+    } else {
+      rightLine.visible = false;
+      if (rightDotRef.current) rightDotRef.current.visible = false;
     }
 
     // 3. Bottom Sensor (Belly mount, straight down to ground)
@@ -189,22 +211,28 @@ export default function ProximitySensors({
     const bottomHit = bottomOrigin.clone().add(bottomDir.clone().multiplyScalar(bottomDist));
 
     // Update Bottom Line Buffer
-    const bottomPos = bottomGeo.attributes.position as THREE.BufferAttribute;
-    const bottomArr = bottomPos.array as Float32Array;
-    bottomArr[0] = bottomOrigin.x;
-    bottomArr[1] = bottomOrigin.y;
-    bottomArr[2] = bottomOrigin.z;
-    bottomArr[3] = bottomHit.x;
-    bottomArr[4] = bottomHit.y;
-    bottomArr[5] = bottomHit.z;
-    bottomPos.needsUpdate = true;
+    if (showVisuals) {
+      const bottomPos = bottomGeo.attributes.position as THREE.BufferAttribute;
+      const bottomArr = bottomPos.array as Float32Array;
+      bottomArr[0] = bottomOrigin.x;
+      bottomArr[1] = bottomOrigin.y;
+      bottomArr[2] = bottomOrigin.z;
+      bottomArr[3] = bottomHit.x;
+      bottomArr[4] = bottomHit.y;
+      bottomArr[5] = bottomHit.z;
+      bottomPos.needsUpdate = true;
 
-    const bottomColor = getSensorColor(bottomDist);
-    (bottomLine.material as THREE.LineBasicMaterial).color.copy(bottomColor);
-    if (bottomDotRef.current && bottomDotMatRef.current) {
-      bottomDotRef.current.position.copy(bottomHit);
-      bottomDotRef.current.visible = bottomDist < 50;
-      bottomDotMatRef.current.color.copy(bottomColor);
+      const bottomColor = getSensorColor(bottomDist);
+      (bottomLine.material as THREE.LineBasicMaterial).color.copy(bottomColor);
+      bottomLine.visible = !isBehindCameraNearPlane(bottomOrigin) && !isBehindCameraNearPlane(bottomHit);
+      if (bottomDotRef.current && bottomDotMatRef.current) {
+        bottomDotRef.current.position.copy(bottomHit);
+        bottomDotRef.current.visible = bottomDist < 50 && !isBehindCameraNearPlane(bottomHit);
+        bottomDotMatRef.current.color.copy(bottomColor);
+      }
+    } else {
+      bottomLine.visible = false;
+      if (bottomDotRef.current) bottomDotRef.current.visible = false;
     }
 
     // Report readings to callback
@@ -218,7 +246,7 @@ export default function ProximitySensors({
   });
 
   return (
-    <group>
+    <group visible={showVisuals}>
       {/* Left Sensor Laser Line */}
       <primitive object={leftLine} />
       <mesh ref={leftDotRef} visible={false}>
