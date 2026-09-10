@@ -306,6 +306,12 @@ export default function App() {
                 onContoursToggle={() => setShowContours(!showContours)}
                 contourInterval={contourInterval}
                 onContourIntervalChange={setContourInterval}
+                renderMode={renderMode}
+                onRenderModeChange={setRenderMode}
+                voxelBands={voxelBands}
+                onVoxelBandsChange={setVoxelBands}
+                voxelResolution={voxelResolution}
+                onVoxelResolutionChange={setVoxelResolution}
                 meshStats={data.mesh_stats}
                 calibration={data.calibration}
                 isGeoref={data.is_georef}

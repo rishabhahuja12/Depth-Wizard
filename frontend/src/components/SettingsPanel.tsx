@@ -1,6 +1,7 @@
 import React from 'react';
-import { Mountain, Layers, Compass } from 'lucide-react';
+import { Mountain, Boxes, Compass, Layers } from 'lucide-react';
 import ContourOverlay from './ContourOverlay';
+import { generateTurboPalette } from '../lib/voxelize.ts';
 
 interface MeshStats {
   elevation_min: number;
@@ -23,6 +24,12 @@ interface SettingsPanelProps {
   onContoursToggle: () => void;
   contourInterval: number;
   onContourIntervalChange: (val: number) => void;
+  renderMode: 'voxel' | 'smooth';
+  onRenderModeChange: (mode: 'voxel' | 'smooth') => void;
+  voxelBands: number;
+  onVoxelBandsChange: (val: number) => void;
+  voxelResolution: number;
+  onVoxelResolutionChange: (val: number) => void;
   meshStats?: MeshStats;
   calibration?: Calibration | null;
   isGeoref?: boolean;
@@ -36,6 +43,12 @@ export default function SettingsPanel({
   onContoursToggle,
   contourInterval,
   onContourIntervalChange,
+  renderMode,
+  onRenderModeChange,
+  voxelBands,
+  onVoxelBandsChange,
+  voxelResolution,
+  onVoxelResolutionChange,
   meshStats,
   calibration,
   isGeoref = false,
@@ -46,6 +59,8 @@ export default function SettingsPanel({
   const spanElev = Math.max(0, maxElev - minElev);
   const unit = calibration ? calibration.unit : 'relative';
   const gsd = meshStats?.pixel_size ? `${meshStats.pixel_size.toFixed(2)}m` : 'SYNTHETIC';
+
+  const palette = generateTurboPalette(voxelBands);
 
   return (
     <div className="space-y-8">
@@ -58,12 +73,137 @@ export default function SettingsPanel({
           Relief & Geometry
         </h3>
         <p className="text-xs text-neutral-400 leading-relaxed font-normal">
-          Adjust vertical scale exaggeration, realtime vector contour lines, and inspect geometric telemetry.
+          Toggle between quantized voxel extrusion and continuous photoreal displacement, configure elevation bands, and inspect geometry.
         </p>
       </div>
 
       <div className="space-y-7">
-        {/* Vertical Exaggeration */}
+        {/* Render Mode Toggle (§3.7, §4) */}
+        <div className="space-y-2.5">
+          <div className="flex justify-between items-center text-xs font-mono">
+            <span className="text-neutral-400 uppercase tracking-wider text-[11px]">
+              3D Render Mode
+            </span>
+            <span className="text-[10px] font-mono text-[#38BDF8] uppercase tracking-wider font-bold">
+              {renderMode === 'voxel' ? 'BLOCK EXTRUSION' : 'PHOTOREAL DISPLACEMENT'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => onRenderModeChange('voxel')}
+              className={`py-2.5 px-3 flex items-center justify-center gap-2 text-xs font-mono font-bold border transition-all ${
+                renderMode === 'voxel'
+                  ? 'bg-white text-black border-white shadow-lg'
+                  : 'bg-transparent text-neutral-400 border-white/15 hover:border-white/40 hover:text-white'
+              }`}
+            >
+              <Boxes className="w-3.5 h-3.5" />
+              VOXEL / BLOCKS
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onRenderModeChange('smooth')}
+              className={`py-2.5 px-3 flex items-center justify-center gap-2 text-xs font-mono font-bold border transition-all ${
+                renderMode === 'smooth'
+                  ? 'bg-white text-black border-white shadow-lg'
+                  : 'bg-transparent text-neutral-400 border-white/15 hover:border-white/40 hover:text-white'
+              }`}
+            >
+              <Mountain className="w-3.5 h-3.5" />
+              SMOOTH / MESH
+            </button>
+          </div>
+        </div>
+
+        {/* Voxel-Specific Configuration (§3.2, §3.8) */}
+        {renderMode === 'voxel' && (
+          <div className="p-4 bg-white/[0.02] border border-white/15 space-y-5">
+            <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#38BDF8] flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 bg-[#38BDF8]" />
+              Voxel Elevation Tuning
+            </div>
+
+            {/* Discrete Band Count Slider */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center text-xs font-mono">
+                <span className="text-neutral-400 uppercase tracking-wider text-[11px]">
+                  Elevation Bands
+                </span>
+                <span className="text-white font-black text-sm">
+                  {voxelBands} BANDS
+                </span>
+              </div>
+
+              <input
+                type="range"
+                min={5}
+                max={12}
+                step={1}
+                value={voxelBands}
+                onChange={(e) => onVoxelBandsChange(parseInt(e.target.value, 10))}
+                className="im-slider"
+              />
+
+              <div className="flex justify-between text-[10px] text-neutral-500 font-mono">
+                <span>5 (DISCRETE)</span>
+                <span>8 (BALANCED)</span>
+                <span>12 (DETAILED)</span>
+              </div>
+
+              {/* Realtime Turbo Palette Swatches */}
+              <div className="pt-1.5">
+                <div className="flex h-2.5 w-full gap-0.5 overflow-hidden border border-white/10">
+                  {palette.map((hex, i) => (
+                    <div
+                      key={i}
+                      className="flex-1 h-full transition-colors"
+                      style={{ backgroundColor: hex }}
+                      title={`Band ${i + 1}: ${hex}`}
+                    />
+                  ))}
+                </div>
+                <div className="flex justify-between text-[9px] text-neutral-500 font-mono mt-1">
+                  <span>LOWEST</span>
+                  <span>TURBO SPECTRUM</span>
+                  <span>HIGHEST</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Block Resolution Slider (§3.8) */}
+            <div className="space-y-2 pt-2 border-t border-white/10">
+              <div className="flex justify-between items-center text-xs font-mono">
+                <span className="text-neutral-400 uppercase tracking-wider text-[11px]">
+                  Block Resolution
+                </span>
+                <span className="text-white font-black text-sm">
+                  {voxelResolution}×{voxelResolution}
+                </span>
+              </div>
+
+              <input
+                type="range"
+                min={24}
+                max={96}
+                step={4}
+                value={voxelResolution}
+                onChange={(e) => onVoxelResolutionChange(parseInt(e.target.value, 10))}
+                className="im-slider"
+              />
+
+              <div className="flex justify-between text-[10px] text-neutral-500 font-mono">
+                <span>24 (COARSE)</span>
+                <span>64 (STANDARD)</span>
+                <span>96 (FINE)</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Vertical Exaggeration (Common to both modes) */}
         <div className="space-y-3.5">
           <div className="flex justify-between items-end text-xs font-mono">
             <span className="text-neutral-400 uppercase tracking-wider text-[11px]">
@@ -89,7 +229,7 @@ export default function SettingsPanel({
             <span>5.0× STEEP</span>
           </div>
 
-          {/* Scale Presets - Sharp Minimalist Grid */}
+          {/* Scale Presets */}
           <div className="grid grid-cols-4 gap-2 pt-1">
             {[
               { label: '0.5×', val: 0.5 },
@@ -118,13 +258,25 @@ export default function SettingsPanel({
 
         {/* Contour Lines Section */}
         <div className="pt-5 border-t border-white/15">
-          <ContourOverlay
-            active={showContours}
-            onToggle={onContoursToggle}
-            interval={contourInterval}
-            onIntervalChange={onContourIntervalChange}
-            isGeoref={isGeoref}
-          />
+          {renderMode === 'smooth' ? (
+            <ContourOverlay
+              active={showContours}
+              onToggle={onContoursToggle}
+              interval={contourInterval}
+              onIntervalChange={onContourIntervalChange}
+              isGeoref={isGeoref}
+            />
+          ) : (
+            <div className="p-3 bg-white/[0.02] border border-white/10 space-y-1.5 text-xs font-mono">
+              <div className="flex items-center gap-2 text-neutral-300 font-bold text-[11px]">
+                <Layers className="w-3.5 h-3.5 text-[#38BDF8]" />
+                NATURAL VOXEL CONTOURS
+              </div>
+              <p className="text-[10px] text-neutral-400 leading-relaxed">
+                In voxel mode, contour boundaries are organically formed by the color-band steps between adjacent blocks.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Elevation & Mesh Telemetry Card */}
