@@ -63,7 +63,15 @@ export default function DroneCanvas({
     roll: 0,
     gridX: 0,
     gridZ: 0,
-    sensors: { left: 50, right: 50, bottom: 25 },
+    sensors: {
+      left: 50,
+      right: 50,
+      bottom: 25,
+      leftScore10: 10,
+      rightScore10: 10,
+      bottomScore10: 10,
+      maxSensorRange: 50,
+    },
     autopilotMode: 'manual',
     cameraGimbal: false,
     cameraMode: 'fpv',
@@ -155,6 +163,9 @@ export default function DroneCanvas({
         sensorLeft={telemetry.sensors.left}
         sensorRight={telemetry.sensors.right}
         sensorBottom={telemetry.sensors.bottom}
+        sensorLeftScore={telemetry.sensors.leftScore10}
+        sensorRightScore={telemetry.sensors.rightScore10}
+        sensorBottomScore={telemetry.sensors.bottomScore10}
         autopilotMode={telemetry.autopilotMode ?? autopilotMode}
         cameraGimbal={telemetry.cameraGimbal ?? cameraGimbal}
         cameraMode={cameraMode}

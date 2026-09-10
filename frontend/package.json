@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "node --experimental-strip-types --test src/lib/voxelize.test.ts src/components/drone/dsmSampling.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/voxelize.test.ts src/components/drone/dsmSampling.test.ts src/lib/matrixCompositor.test.ts"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

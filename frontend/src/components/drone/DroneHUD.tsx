@@ -30,6 +30,9 @@ export interface DroneHUDProps {
   sensorLeft?: number;
   sensorRight?: number;
   sensorBottom?: number;
+  sensorLeftScore?: number;
+  sensorRightScore?: number;
+  sensorBottomScore?: number;
   autopilotMode?: 'manual' | 'orbit' | 'transect';
   cameraGimbal?: boolean;
   cameraMode?: 'fpv' | 'tpp';
@@ -69,6 +72,9 @@ export default function DroneHUD({
   sensorLeft = 50,
   sensorRight = 50,
   sensorBottom = 50,
+  sensorLeftScore,
+  sensorRightScore,
+  sensorBottomScore,
   autopilotMode = 'manual',
   cameraGimbal = false,
   cameraMode = 'fpv',
@@ -81,6 +87,11 @@ export default function DroneHUD({
 }: DroneHUDProps) {
   const speedKmh = (speed * 3.6).toFixed(1);
   const speedMs = speed.toFixed(1);
+
+  // Scaled scores out of 10 for proximity display (dynamically scaled or fallback)
+  const leftScore = sensorLeftScore !== undefined ? sensorLeftScore : Math.min(10.0, Math.max(0, (sensorLeft / 20.0) * 10.0));
+  const rightScore = sensorRightScore !== undefined ? sensorRightScore : Math.min(10.0, Math.max(0, (sensorRight / 20.0) * 10.0));
+  const bottomScore = sensorBottomScore !== undefined ? sensorBottomScore : Math.min(10.0, Math.max(0, (sensorBottom / 20.0) * 10.0));
 
   // Floating-point deadband clamping to eliminate micro-jitter near zero (§1.1)
   const displayPitch = Math.abs(pitch) < 0.05 ? 0 : pitch;
@@ -132,7 +143,8 @@ export default function DroneHUD({
     return ticks;
   }, [heading]);
 
-  const hasProximityAlert = sensorLeft < 3 || sensorRight < 3 || sensorBottom < 2.0;
+  // Proximity Alert: reduced by 80-90% to avoid constant alarms during normal flight
+  const hasProximityAlert = sensorLeft < 0.6 || sensorRight < 0.6 || sensorBottom < 0.4;
 
   return (
     <div className="absolute inset-0 pointer-events-none z-30 select-none overflow-hidden font-mono text-white">
@@ -527,52 +539,55 @@ export default function DroneHUD({
       </div>
 
       {/* 8. Bottom-Right: 3-Sensor Proximity LIDAR Array Cluster (§5) */}
-      <div className="absolute bottom-4 right-6 flex items-center gap-2 p-2.5 bg-black/85 border border-white/15 backdrop-blur-md text-xs shadow-2xl">
-        <div className="flex items-center gap-1.5 text-[10px] text-neutral-400 font-bold tracking-wider px-1">
-          <Radar className="w-3.5 h-3.5 text-[#38BDF8]" />
+      <div className="absolute bottom-4 right-6 flex items-center gap-1.5 p-2 bg-black/85 border border-white/15 backdrop-blur-md text-[11px] shadow-2xl">
+        <div className="flex items-center gap-1 text-[9px] text-neutral-400 font-bold tracking-wider px-0.5">
+          <Radar className="w-3 h-3 text-[#38BDF8]" />
           LIDAR:
         </div>
 
         {/* Left Sensor */}
         <div
-          className={`px-2.5 py-1 border font-bold flex items-center gap-1.5 transition-colors ${
-            sensorLeft < 3
+          className={`px-1.5 py-0.5 border font-bold flex items-center gap-1 transition-colors ${
+            sensorLeft < 0.6
               ? 'bg-red-500/25 border-red-500 text-red-400 animate-pulse'
-              : sensorLeft <= 10
+              : sensorLeft <= 2.0
               ? 'bg-amber-500/15 border-amber-500/60 text-amber-300'
               : 'bg-black/60 border-emerald-500/40 text-emerald-400'
           }`}
         >
-          <span className="text-[9px] text-neutral-400">L:</span>
-          <span>{sensorLeft >= 50 ? '>50m' : `${sensorLeft.toFixed(1)}m`}</span>
+          <span className="text-[8px] text-neutral-400">L:</span>
+          <span>{leftScore.toFixed(1)}/10</span>
+          <span className="text-[8px] opacity-70">({sensorLeft >= 50 ? '>50m' : `${sensorLeft.toFixed(1)}m`})</span>
         </div>
 
         {/* Down / AGL Sensor */}
         <div
-          className={`px-2.5 py-1 border font-bold flex items-center gap-1.5 transition-colors ${
-            sensorBottom < 3
+          className={`px-1.5 py-0.5 border font-bold flex items-center gap-1 transition-colors ${
+            sensorBottom < 0.4
               ? 'bg-red-500/25 border-red-500 text-red-400 animate-pulse'
-              : sensorBottom <= 10
+              : sensorBottom <= 2.0
               ? 'bg-amber-500/15 border-amber-500/60 text-amber-300'
               : 'bg-black/60 border-emerald-500/40 text-emerald-400'
           }`}
         >
-          <span className="text-[9px] text-neutral-400">AGL:</span>
-          <span>{sensorBottom >= 50 ? '>50m' : `${sensorBottom.toFixed(1)}m`}</span>
+          <span className="text-[8px] text-neutral-400">AGL:</span>
+          <span>{bottomScore.toFixed(1)}/10</span>
+          <span className="text-[8px] opacity-70">({sensorBottom >= 50 ? '>50m' : `${sensorBottom.toFixed(1)}m`})</span>
         </div>
 
         {/* Right Sensor */}
         <div
-          className={`px-2.5 py-1 border font-bold flex items-center gap-1.5 transition-colors ${
-            sensorRight < 3
+          className={`px-1.5 py-0.5 border font-bold flex items-center gap-1 transition-colors ${
+            sensorRight < 0.6
               ? 'bg-red-500/25 border-red-500 text-red-400 animate-pulse'
-              : sensorRight <= 10
+              : sensorRight <= 2.0
               ? 'bg-amber-500/15 border-amber-500/60 text-amber-300'
               : 'bg-black/60 border-emerald-500/40 text-emerald-400'
           }`}
         >
-          <span className="text-[9px] text-neutral-400">R:</span>
-          <span>{sensorRight >= 50 ? '>50m' : `${sensorRight.toFixed(1)}m`}</span>
+          <span className="text-[8px] text-neutral-400">R:</span>
+          <span>{rightScore.toFixed(1)}/10</span>
+          <span className="text-[8px] opacity-70">({sensorRight >= 50 ? '>50m' : `${sensorRight.toFixed(1)}m`})</span>
         </div>
       </div>
 

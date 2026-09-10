@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useRef } from 'react';
-import { Upload, ArrowUpRight, Sparkles, Layers, Cpu, Compass, FileCheck } from 'lucide-react';
+import { Upload, ArrowUpRight, Sparkles, Layers, Cpu, Compass, FileCheck, Grid3X3 } from 'lucide-react';
+import MatrixModal from './MatrixModal';
 
 interface DropzoneProps {
   onFileSelected: (file: File, estimateUncertainty?: boolean) => void;
@@ -14,6 +15,7 @@ export default function Dropzone({ onFileSelected, loading, progress }: Dropzone
   const [error, setError] = useState<string | null>(null);
   const [loadingSample, setLoadingSample] = useState<string | null>(null);
   const [estimateUncertainty, setEstimateUncertainty] = useState(false);
+  const [isMatrixOpen, setIsMatrixOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const validateFile = (file: File): boolean => {
@@ -183,6 +185,21 @@ export default function Dropzone({ onFileSelected, loading, progress }: Dropzone
               </label>
             </div>
 
+            {/* Matrix Multi-Tile Grid Trigger */}
+            <div className="pt-2 flex items-center justify-center">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsMatrixOpen(true);
+                }}
+                className="inline-flex items-center gap-2.5 px-6 py-2.5 border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 hover:border-cyan-400 text-cyan-200 text-xs font-mono font-bold uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(6,182,212,0.15)] group cursor-pointer"
+              >
+                <Grid3X3 className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
+                <span>Matrix (Multi-Tile Grid)</span>
+              </button>
+            </div>
+
             {error && (
               <div className="p-4 border border-rose-500 bg-rose-500/10 text-rose-300 text-xs font-mono max-w-md mx-auto flex items-center justify-center gap-2">
                 <span>⚠️</span>
@@ -312,6 +329,16 @@ export default function Dropzone({ onFileSelected, loading, progress }: Dropzone
           GAMUS FINE-TUNED (0.1500 BEST LOSS) · 60 FPS WEBGL ENGINE · 32-BIT GEOTIFF PIPELINE
         </p>
       </div>
+
+      {/* Matrix Grid Mosaic Modal */}
+      <MatrixModal
+        isOpen={isMatrixOpen}
+        onClose={() => setIsMatrixOpen(false)}
+        onSynthesize={(compositeFile) => {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          onFileSelected(compositeFile, estimateUncertainty);
+        }}
+      />
     </div>
   );
 }

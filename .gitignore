@@ -29,6 +29,7 @@ backend/weights/checkpoints/
 backend/exports/
 exports/
 backend/logs/*.jsonl
+*.png
 
 # OS & IDE
 .DS_Store

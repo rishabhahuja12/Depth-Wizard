@@ -131,7 +131,15 @@ export default function DroneFlightController({
   const [propAngle, setPropAngle] = useState(0);
 
   // Proximity sensor telemetry state for soft-bump response
-  const sensorReadingsRef = useRef<SensorReadings>({ left: 50, right: 50, bottom: 50 });
+  const sensorReadingsRef = useRef<SensorReadings>({
+    left: 50,
+    right: 50,
+    bottom: 50,
+    leftScore10: 10,
+    rightScore10: 10,
+    bottomScore10: 10,
+    maxSensorRange: 50,
+  });
 
   // World dimensions
   const worldW = Math.max(1, (meshStats?.width ?? 512) * 0.1);
@@ -143,8 +151,10 @@ export default function DroneFlightController({
     ? 18.0 * verticalScale
     : (meshStats.elevation_max - meshStats.elevation_min) * verticalScale * 0.1;
 
-  const initialX = spawnPoint ? spawnPoint[0] : 0;
-  const initialZ = spawnPoint ? spawnPoint[2] : 0;
+  const limitX = worldW * 0.48;
+  const limitZ = worldD * 0.48;
+  const initialX = spawnPoint ? THREE.MathUtils.clamp(spawnPoint[0], -limitX, limitX) : 0;
+  const initialZ = spawnPoint ? THREE.MathUtils.clamp(spawnPoint[2], -limitZ, limitZ) : 0;
   const spawnGroundY = getTerrainElevationAt(
     initialX,
     initialZ,
@@ -288,17 +298,17 @@ export default function DroneFlightController({
       const accel = thrustVec.clone().sub(velocity.current.clone().multiplyScalar(dragCoeff));
       velocity.current.add(accel.multiplyScalar(dt));
 
-      // Soft-bump velocity zeroing from proximity sensors (§5)
+      // Soft-bump velocity zeroing from proximity sensors (§5 - reduced by 80-90% to eliminate false alarms)
       const sensors = sensorReadingsRef.current;
-      if (sensors.right < 1.5) {
+      if (sensors.right < 0.6) {
         const latSpeed = velocity.current.dot(rightVec);
         if (latSpeed > 0) velocity.current.sub(rightVec.clone().multiplyScalar(latSpeed));
       }
-      if (sensors.left < 1.5) {
+      if (sensors.left < 0.6) {
         const latSpeed = velocity.current.dot(rightVec);
         if (latSpeed < 0) velocity.current.sub(rightVec.clone().multiplyScalar(latSpeed));
       }
-      if (sensors.bottom < 1.5 && velocity.current.y < 0) {
+      if (sensors.bottom < 0.4 && velocity.current.y < 0) {
         velocity.current.y = 0;
       }
 
@@ -317,6 +327,16 @@ export default function DroneFlightController({
         1.2,
         samplingOptions
       );
+
+      // Enforce rectangular bounds limits to keep flight over composite terrain
+      if (Math.abs(collision.position.x) > limitX) {
+        collision.position.x = Math.sign(collision.position.x) * limitX;
+        velocity.current.x = 0;
+      }
+      if (Math.abs(collision.position.z) > limitZ) {
+        collision.position.z = Math.sign(collision.position.z) * limitZ;
+        velocity.current.z = 0;
+      }
 
       droneGroupRef.current.position.set(
         collision.position.x,
@@ -429,6 +449,13 @@ export default function DroneFlightController({
           left: sensorReadingsRef.current.left,
           right: sensorReadingsRef.current.right,
           bottom: aglMeters,
+          leftScore10: sensorReadingsRef.current.leftScore10,
+          rightScore10: sensorReadingsRef.current.rightScore10,
+          bottomScore10:
+            sensorReadingsRef.current.maxSensorRange > 0
+              ? Math.max(0, Math.min(10.0, (aglMeters / sensorReadingsRef.current.maxSensorRange) * 10.0))
+              : sensorReadingsRef.current.bottomScore10,
+          maxSensorRange: sensorReadingsRef.current.maxSensorRange,
         },
         autopilotMode: activeMode,
         cameraGimbal: isGimbal,
@@ -456,6 +483,7 @@ export default function DroneFlightController({
         verticalScale={verticalScale}
         waterLevel={waterLevel}
         showVisuals={cameraMode === 'tpp'}
+        droneScale={droneScale}
         samplingOptions={samplingOptions}
         onReadingsUpdate={(r) => {
           sensorReadingsRef.current = r;
