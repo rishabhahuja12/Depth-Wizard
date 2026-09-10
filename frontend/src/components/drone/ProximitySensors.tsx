@@ -1,7 +1,7 @@
 import React, { useRef, useMemo, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { castSensor, MeshElevationStats } from './dsmSampling.ts';
+import { castSensor, MeshElevationStats, TerrainSamplingOptions } from './dsmSampling.ts';
 
 export interface SensorReadings {
   left: number;
@@ -16,6 +16,7 @@ export interface ProximitySensorsProps {
   verticalScale?: number;
   waterLevel?: number;
   showVisuals?: boolean;
+  samplingOptions?: TerrainSamplingOptions;
   onReadingsUpdate?: (readings: SensorReadings) => void;
 }
 
@@ -37,6 +38,7 @@ export default function ProximitySensors({
   verticalScale = 1.0,
   waterLevel,
   showVisuals = false,
+  samplingOptions,
   onReadingsUpdate,
 }: ProximitySensorsProps) {
   const { camera } = useThree();
@@ -122,7 +124,8 @@ export default function ProximitySensors({
       verticalScale,
       waterLevel,
       50,
-      0.5
+      0.5,
+      samplingOptions
     );
     const leftHit = leftOrigin.clone().add(leftDir.clone().multiplyScalar(leftDist));
 
@@ -165,7 +168,8 @@ export default function ProximitySensors({
       verticalScale,
       waterLevel,
       50,
-      0.5
+      0.5,
+      samplingOptions
     );
     const rightHit = rightOrigin.clone().add(rightDir.clone().multiplyScalar(rightDist));
 
@@ -206,7 +210,8 @@ export default function ProximitySensors({
       verticalScale,
       waterLevel,
       50,
-      0.5
+      0.5,
+      samplingOptions
     );
     const bottomHit = bottomOrigin.clone().add(bottomDir.clone().multiplyScalar(bottomDist));
 

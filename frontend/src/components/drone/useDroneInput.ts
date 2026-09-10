@@ -13,12 +13,14 @@ export interface DroneInputState {
 export interface DroneInputOptions {
   onModeSelect?: (mode: 'manual' | 'orbit' | 'transect') => void;
   onGimbalToggle?: () => void;
+  onCameraModeToggle?: () => void;
+  onQuickPanelToggle?: () => void;
 }
 
 /**
  * useDroneInput:
  * Event-driven keyboard input listener for FPV drone flight mechanics.
- * Maps WASD, Arrow keys, Space, Q, E, Shift, and autopilot shortcut keys (1/2/3/G).
+ * Maps WASD, Arrow keys, Space, Q, E, Shift, and shortcut keys (1/2/3/G/T/P).
  */
 export function useDroneInput(active: boolean = true, options?: DroneInputOptions) {
   const inputRef = useRef<DroneInputState>({
@@ -60,6 +62,8 @@ export function useDroneInput(active: boolean = true, options?: DroneInputOption
       if (key === '2') options?.onModeSelect?.('orbit');
       if (key === '3') options?.onModeSelect?.('transect');
       if (key === 'g') options?.onGimbalToggle?.();
+      if (key === 't') options?.onCameraModeToggle?.();
+      if (key === 'p') options?.onQuickPanelToggle?.();
     };
 
     const onKeyUp = (e: KeyboardEvent) => {

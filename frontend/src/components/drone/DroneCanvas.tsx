@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import DroneTerrainMesh from './DroneTerrainMesh.tsx';
+import { VoxelMesh } from '../VoxelTerrain.tsx';
 import DroneFlightController, { FlightTelemetry } from './DroneFlightController.tsx';
 import DroneHUD from './DroneHUD.tsx';
 import { SensorReadings } from './ProximitySensors.tsx';
@@ -20,12 +21,17 @@ export interface DroneCanvasProps {
   waterLevel: number;
   dsmRaw: number[][];
   spawnPoint?: [number, number, number];
+  renderMode?: 'voxel' | 'smooth';
+  voxelResolution?: number;
+  voxelBands?: number;
+  onOpenQuickPanel?: () => void;
   onExitFpv: () => void;
 }
 
 /**
- * DroneCanvas: Dedicated full-screen 3D FPV Drone flight viewport.
- * Renders the 3D reconstructed terrain surface and the FPV drone with nose-locked camera.
+ * DroneCanvas: Dedicated full-screen 3D FPV / TPP Drone flight viewport.
+ * Supports dual-mesh flight over photoreal smooth terrain or quantized voxel blocks (§3),
+ * with live perspective toggle (FPV / TPP), drone scaling (§4), and quick panel access (§5).
  */
 export default function DroneCanvas({
   heightmapB64,
@@ -36,10 +42,16 @@ export default function DroneCanvas({
   waterLevel,
   dsmRaw,
   spawnPoint,
+  renderMode = 'smooth',
+  voxelResolution = 64,
+  voxelBands = 8,
+  onOpenQuickPanel,
   onExitFpv,
 }: DroneCanvasProps) {
   const [autopilotMode, setAutopilotMode] = useState<'manual' | 'orbit' | 'transect'>('manual');
   const [cameraGimbal, setCameraGimbal] = useState<boolean>(false);
+  const [cameraMode, setCameraMode] = useState<'fpv' | 'tpp'>('fpv');
+  const [droneScale, setDroneScale] = useState<number>(1.0);
 
   const [telemetry, setTelemetry] = useState<FlightTelemetry>({
     speed: 0,
@@ -54,6 +66,7 @@ export default function DroneCanvas({
     sensors: { left: 50, right: 50, bottom: 25 },
     autopilotMode: 'manual',
     cameraGimbal: false,
+    cameraMode: 'fpv',
   });
 
   // Global Esc key listener (§6)
@@ -80,17 +93,28 @@ export default function DroneCanvas({
         <directionalLight position={[50, 80, 50]} intensity={1.3} castShadow />
         <directionalLight position={[-30, 40, -30]} intensity={0.35} />
 
-        {/* 3D Terrain mesh displaced from satellite DSM */}
-        <DroneTerrainMesh
-          heightmapB64={heightmapB64}
-          rgbB64={rgbB64}
-          normalMapB64={normalMapB64}
-          meshStats={meshStats}
-          verticalScale={verticalScale}
-          waterLevel={waterLevel}
-        />
+        {/* 3D Terrain mesh: Quantized Voxel Blocks or Continuous Photoreal Mesh (§3) */}
+        {renderMode === 'voxel' ? (
+          <VoxelMesh
+            dsmRaw={dsmRaw}
+            meshStats={meshStats}
+            verticalScale={verticalScale}
+            waterLevel={waterLevel}
+            targetResolution={voxelResolution}
+            bandCount={voxelBands}
+          />
+        ) : (
+          <DroneTerrainMesh
+            heightmapB64={heightmapB64}
+            rgbB64={rgbB64}
+            normalMapB64={normalMapB64}
+            meshStats={meshStats}
+            verticalScale={verticalScale}
+            waterLevel={waterLevel}
+          />
+        )}
 
-        {/* Procedural drone flight rig, autopilot, and nose/gimbal camera (§1-§7) */}
+        {/* Procedural drone flight rig, autopilot, and nose/gimbal/TPP camera (§1-§7) */}
         <DroneFlightController
           spawnPoint={spawnPoint}
           dsmRaw={dsmRaw}
@@ -99,15 +123,24 @@ export default function DroneCanvas({
           waterLevel={waterLevel}
           autopilotMode={autopilotMode}
           cameraGimbal={cameraGimbal}
+          cameraMode={cameraMode}
+          droneScale={droneScale}
+          samplingOptions={{
+            renderMode,
+            voxelResolution,
+            voxelBands,
+          }}
           onAutopilotModeChange={setAutopilotMode}
           onCameraGimbalToggle={() => setCameraGimbal((prev) => !prev)}
+          onCameraModeChange={setCameraMode}
+          onQuickPanelToggle={onOpenQuickPanel}
           onTelemetryUpdate={setTelemetry}
         />
 
         <gridHelper args={[200, 50, '#1e293b', '#1e293b']} position={[0, -0.05, 0]} />
       </Canvas>
 
-      {/* 2D FPV Heads-Up Display Overlay */}
+      {/* 2D FPV / TPP Heads-Up Display Overlay */}
       <DroneHUD
         onExitFpv={onExitFpv}
         speed={telemetry.speed}
@@ -124,8 +157,13 @@ export default function DroneCanvas({
         sensorBottom={telemetry.sensors.bottom}
         autopilotMode={telemetry.autopilotMode ?? autopilotMode}
         cameraGimbal={telemetry.cameraGimbal ?? cameraGimbal}
+        cameraMode={cameraMode}
+        droneScale={droneScale}
         onAutopilotModeChange={setAutopilotMode}
         onCameraGimbalToggle={() => setCameraGimbal((prev) => !prev)}
+        onCameraModeToggle={() => setCameraMode((prev) => (prev === 'fpv' ? 'tpp' : 'fpv'))}
+        onDroneScaleChange={setDroneScale}
+        onQuickPanelToggle={onOpenQuickPanel}
       />
     </div>
   );

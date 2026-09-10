@@ -246,3 +246,70 @@ test('castSensor returns maxRange when no obstacle intersects ray', () => {
   assert.equal(dist, 50, `Expected maxRange 50, got ${dist}`);
 });
 
+test('getTerrainElevationAt with voxel mode quantizes continuous ramp into discrete stepped blocks (§3)', () => {
+  const meshStats: MeshElevationStats = {
+    width: 200, // worldW = 20 (-10 to +10)
+    height: 200,
+    elevation_min: 0,
+    elevation_max: 100,
+    elevation_range: 100,
+  };
+
+  // Continuous ramp from 0 to 100 across 20 columns
+  const dsmRaw = Array.from({ length: 20 }, () =>
+    Array.from({ length: 20 }, (_, c) => (c / 19) * 100)
+  );
+
+  // In smooth mode, sampling two adjacent points gives continuous differing elevations
+  const ySmooth1 = getTerrainElevationAt(1.0, 0, dsmRaw, meshStats, 1.0, undefined, { renderMode: 'smooth' });
+  const ySmooth2 = getTerrainElevationAt(1.5, 0, dsmRaw, meshStats, 1.0, undefined, { renderMode: 'smooth' });
+  assert.notEqual(ySmooth1, ySmooth2, 'Smooth mode elevations should vary continuously');
+
+  // In voxel mode with coarse resolution (e.g. 8 blocks of width 2.5m, block 4 is [0, 2.5]),
+  // two points in the same voxel block have identical stepped elevation
+  const yVoxel1 = getTerrainElevationAt(1.0, 0, dsmRaw, meshStats, 1.0, undefined, {
+    renderMode: 'voxel',
+    voxelResolution: 8,
+  });
+  const yVoxel2 = getTerrainElevationAt(1.5, 0, dsmRaw, meshStats, 1.0, undefined, {
+    renderMode: 'voxel',
+    voxelResolution: 8,
+  });
+  assert.equal(yVoxel1, yVoxel2, 'Voxel mode within same cell must return identical quantized block height');
+});
+
+test('resolveTerrainCollision in voxel mode prevents clipping into stepped voxel blocks (§3)', () => {
+  const meshStats: MeshElevationStats = {
+    width: 100,
+    height: 100,
+    elevation_min: 0,
+    elevation_max: 50,
+    elevation_range: 50,
+  };
+
+  // 10x10 grid with tall voxel block (30m elevation, worldY = 3.0)
+  const dsmRaw = Array.from({ length: 10 }, () => Array(10).fill(30));
+
+  const prevPos = { x: 0, y: 5.0, z: 0 };
+  const candidatePos = { x: 0, y: 1.0, z: 0 }; // trying to sink through block
+  const velocity = { x: 0, y: -4.0, z: 0 };
+
+  const collision = resolveTerrainCollision(
+    prevPos,
+    candidatePos,
+    velocity,
+    dsmRaw,
+    meshStats,
+    1.0,
+    undefined,
+    1.2,
+    { renderMode: 'voxel', voxelResolution: 10 }
+  );
+
+  // Ground is at 3.0 worldY, min clearance is 1.2 -> drone must clamp to at least 4.2
+  assert.ok(collision.position.y >= 4.2, `Expected position.y >= 4.2, got ${collision.position.y}`);
+  assert.equal(collision.velocity.y, 0, 'Vertical velocity into voxel block must be zeroed');
+  assert.equal(collision.collidedFloor, true);
+});
+
+

@@ -11,7 +11,9 @@ import { Radio } from 'lucide-react';
 import FloodSimulator from './components/FloodSimulator';
 import CrossSection from './components/CrossSection';
 import SettingsPanel from './components/SettingsPanel';
+import TerrainQuickPanel from './components/TerrainQuickPanel';
 import ColorBar from './components/ColorBar';
+import { useTerrainSettings } from './hooks/useTerrainSettings';
 import {
   RotateCcw,
   Clock,
@@ -24,20 +26,42 @@ import {
   Eye,
   Download,
   Check,
+  Sliders,
 } from 'lucide-react';
 
 export default function App() {
   const { upload, data, loading, error, progress, reset } = useInference();
   const { isFpv, toggleFlightMode, exitFpv } = useFlightMode('studio');
 
-  // UI state
-  const [verticalScale, setVerticalScale] = useState(1.5);
-  const [waterLevel, setWaterLevel] = useState(0);
-  const [showContours, setShowContours] = useState(false);
-  const [contourInterval, setContourInterval] = useState(5);
-  const [renderMode, setRenderMode] = useState<'voxel' | 'smooth'>('voxel');
-  const [voxelBands, setVoxelBands] = useState<number>(8);
-  const [voxelResolution, setVoxelResolution] = useState<number>(64);
+  // Unified Terrain Settings (§5)
+  const terrainSettings = useTerrainSettings({
+    initialVerticalScale: 1.5,
+    initialWaterLevel: 0,
+    initialShowContours: false,
+    initialContourInterval: 5,
+    initialRenderMode: 'voxel',
+    initialVoxelBands: 8,
+    initialVoxelResolution: 64,
+  });
+
+  const {
+    verticalScale,
+    setVerticalScale,
+    waterLevel,
+    setWaterLevel,
+    showContours,
+    setShowContours,
+    contourInterval,
+    setContourInterval,
+    renderMode,
+    setRenderMode,
+    voxelBands,
+    setVoxelBands,
+    voxelResolution,
+    setVoxelResolution,
+  } = terrainSettings;
+
+  const [isQuickPanelOpen, setIsQuickPanelOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'surface' | 'flood' | 'profile' | 'inspect'>('surface');
   const [droneSpawnPreset, setDroneSpawnPreset] = useState<'center' | 'north' | 'south' | 'west' | 'east'>('center');
   const [exporting, setExporting] = useState(false);
@@ -221,6 +245,21 @@ export default function App() {
             )}
           </button>
 
+          {/* Terrain & Voxel Detail Quick Panel Trigger (§5) */}
+          <button
+            type="button"
+            onClick={() => setIsQuickPanelOpen((prev) => !prev)}
+            className={`py-2 px-3 text-xs font-mono font-bold border transition-all flex items-center gap-1.5 ${
+              isQuickPanelOpen
+                ? 'bg-[#38BDF8] text-black border-[#38BDF8] shadow-lg shadow-[#38BDF8]/20'
+                : 'bg-transparent text-neutral-300 border-white/20 hover:border-white/50 hover:text-white hover:bg-white/5'
+            }`}
+            title="Toggle Terrain & Voxel Detail Quick Panel [Key P]"
+          >
+            <Sliders className="w-3.5 h-3.5 text-[#38BDF8]" />
+            TERRAIN [P]
+          </button>
+
           <button
             type="button"
             onClick={() => {
@@ -262,6 +301,10 @@ export default function App() {
             waterLevel={waterLevel}
             dsmRaw={data.dsm_raw}
             spawnPoint={droneSpawnPoint}
+            renderMode={renderMode}
+            voxelResolution={voxelResolution}
+            voxelBands={voxelBands}
+            onOpenQuickPanel={() => setIsQuickPanelOpen((prev) => !prev)}
             onExitFpv={() => {
               if (document.pointerLockElement) {
                 document.exitPointerLock();
@@ -419,6 +462,13 @@ export default function App() {
           </>
         )}
       </div>
+
+      {/* Floating Terrain & Voxel Detail Quick Panel Overlay (§5) */}
+      <TerrainQuickPanel
+        isOpen={isQuickPanelOpen}
+        onClose={() => setIsQuickPanelOpen(false)}
+        settings={terrainSettings}
+      />
     </div>
   );
 }

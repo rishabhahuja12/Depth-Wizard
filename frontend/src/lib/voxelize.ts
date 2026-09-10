@@ -262,3 +262,20 @@ export function voxelize(
     palette,
   };
 }
+
+/**
+ * Computes quantized world-space surface height for a voxel block (§3),
+ * matching VoxelMesh instance height in VoxelTerrain.tsx exactly.
+ */
+export function quantizeVoxelHeightWorld(
+  rawH: number,
+  elevationMin: number,
+  elevationRange: number,
+  verticalScale: number = 1.0,
+  isRelative: boolean = false
+): number {
+  const normH = Math.max(0, Math.min(1, (rawH - elevationMin) / Math.max(1e-6, elevationRange)));
+  return isRelative
+    ? Math.max(0.12, normH * 18.0 * verticalScale)
+    : Math.max(0.12, (rawH - elevationMin) * verticalScale * 0.1);
+}

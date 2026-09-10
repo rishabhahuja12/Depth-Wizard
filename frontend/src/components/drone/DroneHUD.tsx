@@ -12,6 +12,8 @@ import {
   MapPin,
   Video,
   CircleDot,
+  Eye,
+  Layers,
 } from 'lucide-react';
 
 export interface DroneHUDProps {
@@ -30,8 +32,13 @@ export interface DroneHUDProps {
   sensorBottom?: number;
   autopilotMode?: 'manual' | 'orbit' | 'transect';
   cameraGimbal?: boolean;
+  cameraMode?: 'fpv' | 'tpp';
+  droneScale?: number;
   onAutopilotModeChange?: (mode: 'manual' | 'orbit' | 'transect') => void;
   onCameraGimbalToggle?: () => void;
+  onCameraModeToggle?: () => void;
+  onDroneScaleChange?: (scale: number) => void;
+  onQuickPanelToggle?: () => void;
 }
 
 /**
@@ -64,8 +71,13 @@ export default function DroneHUD({
   sensorBottom = 50,
   autopilotMode = 'manual',
   cameraGimbal = false,
+  cameraMode = 'fpv',
+  droneScale = 1.0,
   onAutopilotModeChange,
   onCameraGimbalToggle,
+  onCameraModeToggle,
+  onDroneScaleChange,
+  onQuickPanelToggle,
 }: DroneHUDProps) {
   const speedKmh = (speed * 3.6).toFixed(1);
   const speedMs = speed.toFixed(1);
@@ -230,21 +242,67 @@ export default function DroneHUD({
           </div>
         </div>
 
-        {/* Right: Camera Gimbal Toggle & Avionics Status (§7) */}
+        {/* Right: Camera Mode Toggle, TPP Scale Slider, Quick Panel & Avionics Status (§2, §4, §5, §7) */}
         <div className="flex items-center gap-2">
-          {/* Stabilized Gimbal Toggle Button */}
+          {/* Perspective Toggle Button (FPV / TPP) (§2) */}
           <button
             type="button"
-            onClick={onCameraGimbalToggle}
+            onClick={onCameraModeToggle}
             className={`px-2.5 py-1.5 border text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-md ${
-              cameraGimbal
-                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/60 shadow-emerald-500/20'
-                : 'bg-black/80 text-neutral-400 border-white/20 hover:text-white'
+              cameraMode === 'tpp'
+                ? 'bg-[#38BDF8]/25 text-[#38BDF8] border-[#38BDF8]/70 shadow-[#38BDF8]/20'
+                : 'bg-black/80 text-neutral-300 border-white/20 hover:text-white'
             }`}
-            title="Toggle Horizon-Stabilized Gimbal [Key G]"
+            title="Toggle Perspective: FPV Cockpit vs TPP Chase [Key T]"
           >
-            <Video className="w-3 h-3" />
-            <span>CAM: {cameraGimbal ? 'GIMBAL STAB' : 'FPV NOSE'} [G]</span>
+            <Eye className="w-3 h-3 text-[#38BDF8]" />
+            <span>{cameraMode === 'tpp' ? 'CAM: TPP CHASE [T]' : 'CAM: FPV NOSE [T]'}</span>
+          </button>
+
+          {/* TPP Drone Size Slider (§4) */}
+          {cameraMode === 'tpp' && (
+            <div className="flex items-center gap-2 px-2.5 py-1 bg-black/85 border border-white/20 text-[10px] shadow-lg">
+              <span className="text-neutral-400 font-bold">SIZE:</span>
+              <input
+                type="range"
+                min={0.5}
+                max={3.0}
+                step={0.1}
+                value={droneScale}
+                onChange={(e) => onDroneScaleChange?.(parseFloat(e.target.value))}
+                className="w-16 accent-[#38BDF8] cursor-pointer"
+                title="Adjust visible drone model scale (0.5x - 3.0x)"
+              />
+              <span className="text-[#38BDF8] font-black min-w-[28px]">{droneScale.toFixed(1)}x</span>
+            </div>
+          )}
+
+          {/* Stabilized Gimbal Toggle Button (FPV mode only) */}
+          {cameraMode === 'fpv' && (
+            <button
+              type="button"
+              onClick={onCameraGimbalToggle}
+              className={`px-2.5 py-1.5 border text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-md ${
+                cameraGimbal
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/60 shadow-emerald-500/20'
+                  : 'bg-black/80 text-neutral-400 border-white/20 hover:text-white'
+              }`}
+              title="Toggle Horizon-Stabilized Gimbal [Key G]"
+            >
+              <Video className="w-3 h-3" />
+              <span>GIMBAL: {cameraGimbal ? 'STAB' : 'RIGID'} [G]</span>
+            </button>
+          )}
+
+          {/* Quick Terrain & Voxel Detail Panel Button (§5) */}
+          <button
+            type="button"
+            onClick={onQuickPanelToggle}
+            className="px-2.5 py-1.5 bg-black/85 border border-white/20 hover:border-[#38BDF8] hover:text-[#38BDF8] text-neutral-300 text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-md"
+            title="Toggle Terrain & Voxel Detail Quick Panel [Key P]"
+          >
+            <Layers className="w-3 h-3 text-[#38BDF8]" />
+            <span>TERRAIN [P]</span>
           </button>
 
           <div className="px-3 py-1 bg-black/80 border border-white/15 text-[10px] text-neutral-300 flex items-center gap-2 shadow-lg">
@@ -463,6 +521,8 @@ export default function DroneHUD({
         <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">SPACE / Q</kbd> Up</div>
         <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">E</kbd> Down</div>
         <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">1/2/3</kbd> Autopilot</div>
+        <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">T</kbd> TPP/FPV</div>
+        <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">P</kbd> Terrain</div>
         <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">G</kbd> Gimbal</div>
       </div>
 

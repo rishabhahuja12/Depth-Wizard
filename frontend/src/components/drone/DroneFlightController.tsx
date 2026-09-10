@@ -9,6 +9,7 @@ import {
   computeAgl,
   computeMsl,
   resolveTerrainCollision,
+  TerrainSamplingOptions,
 } from './dsmSampling.ts';
 
 export interface FlightTelemetry {
@@ -42,18 +43,24 @@ export interface DroneFlightControllerProps {
   autopilotMode?: 'manual' | 'orbit' | 'transect';
   cameraGimbal?: boolean;
   cameraMode?: 'fpv' | 'tpp';
+  droneScale?: number;
+  samplingOptions?: TerrainSamplingOptions;
   onAutopilotModeChange?: (mode: 'manual' | 'orbit' | 'transect') => void;
   onCameraGimbalToggle?: () => void;
   onCameraModeChange?: (mode: 'fpv' | 'tpp') => void;
+  onQuickPanelToggle?: () => void;
   onTelemetryUpdate?: (telemetry: FlightTelemetry) => void;
 }
 
 /**
- * DroneFlightController (Phase 2 - 7):
+ * DroneFlightController (Phase 2 - 7 + TPP & Dual-Mesh):
  * - Newtonian flight physics with velocity integration, drag, auto-bank roll, thrust-pitch coupling
  * - Phase 3 AGL clearance & hard-floor/rooftop collision resolution
  * - Phase 4 Proximity sensor soft-bump velocity zeroing
  * - Phase 7 Autopilot Orbital POI recon, Terrain-Hugging Transect cruise, and Horizon-Stabilized Gimbal
+ * - §2 TPP Smooth Chase Camera rig with lookAt follow and terrain clearance
+ * - §3 Dual-Mesh flight over smooth or voxel-quantized terrain
+ * - §4 Live Drone Scale factor
  */
 export default function DroneFlightController({
   spawnPoint,
@@ -64,9 +71,12 @@ export default function DroneFlightController({
   autopilotMode: controlledMode,
   cameraGimbal: controlledGimbal,
   cameraMode = 'fpv',
+  droneScale = 1.0,
+  samplingOptions,
   onAutopilotModeChange,
   onCameraGimbalToggle,
   onCameraModeChange,
+  onQuickPanelToggle,
   onTelemetryUpdate,
 }: DroneFlightControllerProps) {
   const droneGroupRef = useRef<THREE.Group>(null);
@@ -89,11 +99,22 @@ export default function DroneFlightController({
     onCameraGimbalToggle?.();
   };
 
-  // Keyboard input listener with autopilot shortcut dispatch (1/2/3/G)
+  const handleCameraModeToggle = () => {
+    const next = cameraMode === 'fpv' ? 'tpp' : 'fpv';
+    onCameraModeChange?.(next);
+  };
+
+  // Keyboard input listener with autopilot shortcut dispatch (1/2/3/G/T/P)
   const inputRef = useDroneInput(true, {
     onModeSelect: handleModeSelect,
     onGimbalToggle: handleGimbalToggle,
+    onCameraModeToggle: handleCameraModeToggle,
+    onQuickPanelToggle,
   });
+
+  // TPP chase camera smooth position tracking ref (§2)
+  const chaseCamPos = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
+  const prevCameraMode = useRef<'fpv' | 'tpp'>('fpv');
 
   // Physics state vectors
   const velocity = useRef(new THREE.Vector3(0, 0, 0));
@@ -130,7 +151,8 @@ export default function DroneFlightController({
     dsmRaw,
     meshStats,
     verticalScale,
-    waterLevel
+    waterLevel,
+    samplingOptions
   );
   const initialY = (spawnPoint && spawnPoint[1] > 0)
     ? spawnPoint[1]
@@ -181,7 +203,7 @@ export default function DroneFlightController({
 
       const targetX = orbitRadius * Math.cos(orbitAngle.current);
       const targetZ = orbitRadius * Math.sin(orbitAngle.current);
-      groundWorldY = getTerrainElevationAt(targetX, targetZ, dsmRaw, meshStats, verticalScale, waterLevel);
+      groundWorldY = getTerrainElevationAt(targetX, targetZ, dsmRaw, meshStats, verticalScale, waterLevel, samplingOptions);
       const targetY = Math.max(maxElevWorld + 6.0, groundWorldY + 6.0);
 
       droneGroupRef.current.position.lerp(new THREE.Vector3(targetX, targetY, targetZ), 5 * dt);
@@ -218,7 +240,8 @@ export default function DroneFlightController({
         dsmRaw,
         meshStats,
         verticalScale,
-        waterLevel
+        waterLevel,
+        samplingOptions
       );
       const targetY = groundWorldY + 5.5;
       droneGroupRef.current.position.y = THREE.MathUtils.lerp(droneGroupRef.current.position.y, targetY, 4 * dt);
@@ -291,7 +314,8 @@ export default function DroneFlightController({
         meshStats,
         verticalScale,
         waterLevel,
-        1.2
+        1.2,
+        samplingOptions
       );
 
       droneGroupRef.current.position.set(
@@ -321,19 +345,53 @@ export default function DroneFlightController({
     // Apply drone body orientation in YXZ Euler order
     droneGroupRef.current.rotation.set(pitch.current, yaw.current, roll.current, 'YXZ');
 
-    // Camera synchronization: Selectable Gimbal vs Rigid Nose-Lock (§7)
-    const noseOffset = new THREE.Vector3(0, 0.08, -0.38);
-    noseOffset.applyQuaternion(droneGroupRef.current.quaternion);
-    camera.position.copy(droneGroupRef.current.position).add(noseOffset);
+    // Camera synchronization: Selectable FPV Nose / Gimbal vs TPP Chase View (§2)
+    if (cameraMode === 'tpp') {
+      // Third-Person Perspective (TPP) Chase Camera (§2)
+      // Follows behind (+Z) and above (+Y) the drone's heading frame
+      const chaseOffsetLocal = new THREE.Vector3(0, 2.2, 5.2);
+      const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current);
+      const targetCamPos = droneGroupRef.current.position
+        .clone()
+        .add(chaseOffsetLocal.clone().applyQuaternion(yawQuat));
 
-    if (isGimbal) {
-      // 2-axis horizon-stabilized camera: follow heading, keep roll/pitch level
-      const gimbalEuler = new THREE.Euler(0, yaw.current, 0, 'YXZ');
-      camera.quaternion.setFromEuler(gimbalEuler);
+      // Terrain anti-clipping floor protection
+      const camTerrainY = getTerrainElevationAt(
+        targetCamPos.x,
+        targetCamPos.z,
+        dsmRaw,
+        meshStats,
+        verticalScale,
+        waterLevel,
+        samplingOptions
+      );
+      targetCamPos.y = Math.max(targetCamPos.y, camTerrainY + 0.9);
+
+      if (prevCameraMode.current !== 'tpp') {
+        chaseCamPos.current.copy(targetCamPos);
+      } else {
+        chaseCamPos.current.lerp(targetCamPos, Math.min(1.0, 8.0 * dt));
+      }
+      camera.position.copy(chaseCamPos.current);
+
+      const lookTarget = droneGroupRef.current.position.clone().add(new THREE.Vector3(0, 0.35, 0));
+      camera.lookAt(lookTarget);
     } else {
-      // Rigid nose-locked FPV camera
-      camera.quaternion.copy(droneGroupRef.current.quaternion);
+      // First-Person Perspective (FPV) Nose Camera
+      const noseOffset = new THREE.Vector3(0, 0.08, -0.38);
+      noseOffset.applyQuaternion(droneGroupRef.current.quaternion);
+      camera.position.copy(droneGroupRef.current.position).add(noseOffset);
+
+      if (isGimbal) {
+        // 2-axis horizon-stabilized camera: follow heading, keep roll/pitch level
+        const gimbalEuler = new THREE.Euler(0, yaw.current, 0, 'YXZ');
+        camera.quaternion.setFromEuler(gimbalEuler);
+      } else {
+        // Rigid nose-locked FPV camera
+        camera.quaternion.copy(droneGroupRef.current.quaternion);
+      }
     }
+    prevCameraMode.current = cameraMode;
 
     // Propeller spin speed tied to throttle magnitude
     const spinRate = (hasManualThrust || activeMode !== 'manual' ? (input.turbo ? 75 : 50) : 18) + currentSpeed * 0.7;
@@ -381,14 +439,16 @@ export default function DroneFlightController({
 
   return (
     <group ref={droneGroupRef}>
-      {/* Visual drone model only rendered in TPP chase view (§1.1 & §2) */}
+      {/* Visual drone model with live scaling in TPP chase view (§1.1, §2 & §4) */}
       {cameraMode === 'tpp' && (
-        <DroneModel
-          throttle={velocity.current.length()}
-          propRotation={propAngle}
-        />
+        <group scale={droneScale}>
+          <DroneModel
+            throttle={velocity.current.length()}
+            propRotation={propAngle}
+          />
+        </group>
       )}
-      {/* Proximity sensors: raycast runs continuously, 3D laser visual lines only rendered in TPP (§1.2 & §2) */}
+      {/* Proximity sensors: raycast runs continuously, 3D laser visual lines only rendered in TPP (§1.2, §2 & §3) */}
       <ProximitySensors
         droneRef={droneGroupRef}
         dsmRaw={dsmRaw}
@@ -396,6 +456,7 @@ export default function DroneFlightController({
         verticalScale={verticalScale}
         waterLevel={waterLevel}
         showVisuals={cameraMode === 'tpp'}
+        samplingOptions={samplingOptions}
         onReadingsUpdate={(r) => {
           sensorReadingsRef.current = r;
         }}

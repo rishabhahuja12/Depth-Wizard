@@ -18,10 +18,16 @@ function clamp(val: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, val));
 }
 
+export interface TerrainSamplingOptions {
+  renderMode?: 'voxel' | 'smooth';
+  voxelResolution?: number;
+  voxelBands?: number;
+}
+
 /**
  * Samples the 3D world Y elevation of the terrain at Three.js coordinates (x, z).
  * Reuses the row-major dsm_raw elevation grid and matches the displacementScale
- * of DroneTerrainMesh and TerrainCanvas without expensive mesh raycasting.
+ * of DroneTerrainMesh or stepped VoxelTerrain instances without expensive mesh raycasting.
  *
  * @param x World X coordinate in Three.js space
  * @param z World Z coordinate in Three.js space
@@ -29,6 +35,7 @@ function clamp(val: number, min: number, max: number): number {
  * @param meshStats DSM dimensions and elevation boundaries
  * @param verticalScale Exaggeration multiplier (default 1.0)
  * @param waterLevel Optional flood plane elevation
+ * @param options Optional sampling configuration (renderMode, voxelResolution, voxelBands)
  * @returns World Y coordinate of the terrain surface
  */
 export function getTerrainElevationAt(
@@ -37,7 +44,8 @@ export function getTerrainElevationAt(
   dsmRaw: number[][],
   meshStats: MeshElevationStats,
   verticalScale = 1.0,
-  waterLevel?: number
+  waterLevel?: number,
+  options?: TerrainSamplingOptions
 ): number {
   if (!dsmRaw || dsmRaw.length === 0 || !dsmRaw[0] || dsmRaw[0].length === 0) {
     return 0;
@@ -50,6 +58,61 @@ export function getTerrainElevationAt(
   const worldW = Math.max(1e-4, meshStats.width * 0.1);
   const worldD = Math.max(1e-4, meshStats.height * 0.1);
 
+  // Voxel-stepped surface sampling (§3): snap to discrete block geometry
+  if (options?.renderMode === 'voxel') {
+    const targetRes = Math.max(4, Math.min(256, options.voxelResolution ?? 64));
+    let vCols: number;
+    let vRows: number;
+    if (cols >= rows) {
+      vCols = targetRes;
+      vRows = Math.max(1, Math.round(targetRes * (rows / cols)));
+    } else {
+      vRows = targetRes;
+      vCols = Math.max(1, Math.round(targetRes * (cols / rows)));
+    }
+
+    const u = clamp(x / worldW + 0.5, 0, 0.999999);
+    const v = clamp(z / worldD + 0.5, 0, 0.999999);
+    const blockC = Math.floor(u * vCols);
+    const blockR = Math.floor(v * vRows);
+
+    const srcR0 = Math.floor((blockR * rows) / vRows);
+    const srcR1 = Math.max(srcR0 + 1, Math.floor(((blockR + 1) * rows) / vRows));
+    const srcC0 = Math.floor((blockC * cols) / vCols);
+    const srcC1 = Math.max(srcC0 + 1, Math.floor(((blockC + 1) * cols) / vCols));
+
+    let sum = 0;
+    let count = 0;
+    for (let sy = srcR0; sy < srcR1; sy++) {
+      const srcRow = dsmRaw[sy];
+      if (!srcRow) continue;
+      for (let sx = srcC0; sx < srcC1; sx++) {
+        const val = srcRow[sx];
+        if (val !== undefined && !Number.isNaN(val) && Number.isFinite(val)) {
+          sum += val;
+          count++;
+        }
+      }
+    }
+    const rawElev = count > 0 ? sum / count : (dsmRaw[srcR0]?.[srcC0] ?? meshStats.elevation_min);
+
+    const isRelative = meshStats.elevation_range <= 2.0;
+    const elevMin = meshStats.elevation_min;
+    const elevRange = Math.max(1e-6, meshStats.elevation_range);
+    const normH = Math.max(0, Math.min(1, (rawElev - elevMin) / elevRange));
+    let worldY = isRelative
+      ? Math.max(0.12, normH * 18.0 * verticalScale)
+      : Math.max(0.12, (rawElev - elevMin) * verticalScale * 0.1);
+
+    if (waterLevel !== undefined && waterLevel > meshStats.elevation_min) {
+      const verticalFactor = isRelative ? 18.0 * verticalScale : verticalScale * 0.1;
+      const waterWorldY = (waterLevel - meshStats.elevation_min) * verticalFactor;
+      worldY = Math.max(worldY, waterWorldY);
+    }
+    return worldY;
+  }
+
+  // Continuous photoreal displacement sampling (Smooth mode)
   // Plane is centered at (0, 0, 0) in world space
   // Normalized UV coordinates [0, 1]
   const u = clamp(x / worldW + 0.5, 0, 1);
@@ -152,7 +215,8 @@ export function resolveTerrainCollision(
   meshStats: MeshElevationStats,
   verticalScale = 1.0,
   waterLevel?: number,
-  minClearance = 1.2
+  minClearance = 1.2,
+  options?: TerrainSamplingOptions
 ): CollisionResult {
   const targetGroundY = getTerrainElevationAt(
     candidatePos.x,
@@ -160,7 +224,8 @@ export function resolveTerrainCollision(
     dsmRaw,
     meshStats,
     verticalScale,
-    waterLevel
+    waterLevel,
+    options
   );
 
   let collidedFloor = false;
@@ -185,7 +250,8 @@ export function resolveTerrainCollision(
       dsmRaw,
       meshStats,
       verticalScale,
-      waterLevel
+      waterLevel,
+      options
     );
     const minAllowedY = currentGroundY + minClearance;
     if (newPos.y < minAllowedY) {
@@ -232,6 +298,7 @@ export function resolveTerrainCollision(
  * @param waterLevel Flood plane elevation
  * @param maxRange Maximum sensing distance (default 50m)
  * @param step Sampling step along ray (default 0.5m)
+ * @param options Terrain sampling configuration (voxel vs smooth)
  * @returns Hit distance in meters/world units (clamped to maxRange)
  */
 export function castSensor(
@@ -242,7 +309,8 @@ export function castSensor(
   verticalScale = 1.0,
   waterLevel?: number,
   maxRange = 50,
-  step = 0.5
+  step = 0.5,
+  options?: TerrainSamplingOptions
 ): number {
   // If sensor is directed straight down (e.g. dirWorld.y <= -0.9)
   if (dirWorld.y <= -0.9) {
@@ -252,7 +320,8 @@ export function castSensor(
       dsmRaw,
       meshStats,
       verticalScale,
-      waterLevel
+      waterLevel,
+      options
     );
     const dist = origin.y - groundY;
     return Math.max(0, Math.min(maxRange, dist));
@@ -268,7 +337,8 @@ export function castSensor(
       dsmRaw,
       meshStats,
       verticalScale,
-      waterLevel
+      waterLevel,
+      options
     );
     if (groundY >= rayY - 0.2) {
       return d;
