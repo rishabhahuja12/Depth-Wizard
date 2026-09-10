@@ -1,5 +1,5 @@
 # 🧙‍♂️ DepthWizard — Single-View Optical Satellite RGB to Metric DSM
-### Problem Statement SIH26175 · Smart India Hackathon 2026 · ISRO Space Applications Centre (SAC)
+### Monocular Optical Satellite 3D Digital Surface Model Pipeline · ISRO Space Applications Centre (SAC)
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-CUDA%20fp16-EE4C2C.svg)](https://pytorch.org/)
@@ -30,21 +30,21 @@
 
 ```mermaid
 flowchart TD
-    A["Raw Satellite Tile (GeoTIFF / PNG)"] --> B["FastAPI Backend Ingestion"]
-    B --> C["Rasterio Metadata Extraction (CRS, GSD, Affine)"]
-    B --> D["Depth Anything V2 ViT-S Backbone"]
-    D --> E["Normalized Disparity / Depth Map"]
-    C --> F{"Is Georeferenced?"}
-    F -->|Yes - GeoTIFF| G["Metric Prior Calibration: DTM_base + alpha * nDSM (meters)"]
-    F -->|No - Standard RGB| H["Relative Normalization: 0.0 to 1.0 (relative)"]
-    G --> I["512x512 Decimated Heightfield Mesh"]
+    A["Raw Satellite Tile: GeoTIFF or PNG"] --> B["FastAPI Ingestion"]
+    B --> C["Rasterio Metadata Extraction"]
+    B --> D["Depth Anything V2 Backbone"]
+    D --> E["Normalized Disparity Map"]
+    C --> F{Is Georeferenced?}
+    F -->|Yes| G["Metric Prior Calibration: DTM_base + alpha * nDSM"]
+    F -->|No| H["Relative Normalization: 0.0 to 1.0"]
+    G --> I["512x512 Decimated Mesh"]
     H --> I
-    I --> J["FastAPI JSON Telemetry & Float Array"]
-    J --> K["Vite + React + Three.js 3D WebGL Canvas"]
-    K --> L["Interactive 3D Flythrough & Shader Displacement"]
+    I --> J["FastAPI JSON Telemetry and Heightfield"]
+    J --> K["Three.js 3D WebGL Canvas"]
+    K --> L["Interactive 3D Flythrough and Relief"]
     K --> M["Hydrologic Flood Simulation"]
-    K --> N["Elevation Transect Profile (Recharts)"]
-    K --> O["32-Bit GeoTIFF Export via GDAL/Rasterio"]
+    K --> N["Elevation Transect Profile"]
+    K --> O["32-Bit GeoTIFF Export via GDAL"]
 ```
 
 ### 1. Depth Estimation Backbone
@@ -178,14 +178,14 @@ DepthWizard/
 │   ├── package.json               # Node.js dependencies
 │   ├── vite.config.ts             # Vite build configuration with API proxy
 │   └── index.html                 # HTML entry point with Monumental typography
-├── docs/                          # Architectural Plans, Bibles & Hackathon Documentation
+├── docs/                          # Architecture Specifications, Engineering Bibles & Research
 │   ├── DEPTHWIZARD_MASTER_PLAN.md # Master plan: single-view RGB to DSM, 50% accuracy + 50% UX
 │   ├── DEPTHWIZARD_FRONTEND_BIBLE.md # Complete frontend design & 3D WebGL flythrough engine guide
 │   ├── DEPTHWIZARD_IMPLEMENTATION_BIBLE.md # Mathematical formulations, DTM/nDSM & pipeline details
 │   ├── GAMUS_TRAINING_PLAN.md     # GAMUS / DFC2019 fine-tuning strategy & hyperparameters
 │   ├── RTX4060_EXECUTION_PLAN.md  # GPU compute execution, AMP fp16 & CUDA benchmark
 │   ├── FLASH_MASTER_PROMPT.md     # Agent system prompts and full context documentation
-│   └── SIH26175_ISRO_SAC_PROBLEM_STATEMENT.md # Official ISRO SAC problem statement & rubric
+│   └── ISRO_SAC_RESEARCH_SPECIFICATION.md # ISRO SAC Research Objectives & Technical Rubric
 ├── test_datasets/                 # Curated verification testbeds (Ready to test)
 │   ├── geotiff_mode/              # 4 GeoTIFF tiles (EPSG:32617 & EPSG:32643, 0.33m–0.50m GSD)
 │   └── optical_mode/              # 4 Standard Optical tiles (PNG / JPEG, up to 1024×1024)
@@ -280,6 +280,6 @@ DepthWizard's user interface is crafted under the **Exaggerated Minimalism** des
 
 ---
 
-## 🏆 Smart India Hackathon 2026 Team & Attribution
+## 👥 Research & Engineering Team Attribution
 
-Developed for **Problem Statement SIH26175** — *Single-View Optical Satellite RGB to Metric DSM*, sponsored by **Space Applications Centre (ISRO), Department of Space, Government of India**.
+Developed for the **Space Applications Centre (ISRO), Department of Space, Government of India** monocular 3D terrain reconstruction initiative (*Single-View Optical Satellite RGB to Metric DSM*).
