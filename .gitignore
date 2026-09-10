@@ -26,10 +26,8 @@ backend/weights/checkpoints/
 *.npz
 
 # Runtime & Temporary Exports
-backend/exports/*.tif
-backend/exports/*.tiff
-backend/exports/*.png
-!backend/exports/.gitkeep
+backend/exports/
+exports/
 backend/logs/*.jsonl
 
 # OS & IDE
