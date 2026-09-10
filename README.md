@@ -76,8 +76,8 @@ Producing real-world elevations in **meters** scaled by the physical Ground Samp
 ### Step 1: Clone the Repository & Initialize Git LFS
 ```bash
 # Clone the repository
-git clone https://github.com/rishabhahuja12/DepthWizard.git
-cd DepthWizard
+git clone https://github.com/rishabhahuja12/Depth-Wizard.git
+cd Depth-Wizard
 
 # Pull model weights tracked by Git LFS
 git lfs install
@@ -178,6 +178,14 @@ DepthWizard/
 │   ├── package.json               # Node.js dependencies
 │   ├── vite.config.ts             # Vite build configuration with API proxy
 │   └── index.html                 # HTML entry point with Monumental typography
+├── docs/                          # Architectural Plans, Bibles & Hackathon Documentation
+│   ├── DEPTHWIZARD_MASTER_PLAN.md # Master plan: single-view RGB to DSM, 50% accuracy + 50% UX
+│   ├── DEPTHWIZARD_FRONTEND_BIBLE.md # Complete frontend design & 3D WebGL flythrough engine guide
+│   ├── DEPTHWIZARD_IMPLEMENTATION_BIBLE.md # Mathematical formulations, DTM/nDSM & pipeline details
+│   ├── GAMUS_TRAINING_PLAN.md     # GAMUS / DFC2019 fine-tuning strategy & hyperparameters
+│   ├── RTX4060_EXECUTION_PLAN.md  # GPU compute execution, AMP fp16 & CUDA benchmark
+│   ├── FLASH_MASTER_PROMPT.md     # Agent system prompts and full context documentation
+│   └── SIH26175_ISRO_SAC_PROBLEM_STATEMENT.md # Official ISRO SAC problem statement & rubric
 ├── test_datasets/                 # Curated verification testbeds (Ready to test)
 │   ├── geotiff_mode/              # 4 GeoTIFF tiles (EPSG:32617 & EPSG:32643, 0.33m–0.50m GSD)
 │   └── optical_mode/              # 4 Standard Optical tiles (PNG / JPEG, up to 1024×1024)
