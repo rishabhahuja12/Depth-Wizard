@@ -26,6 +26,22 @@
 
 ---
 
+## 📖 Context & Reading Guide: Where to Start
+
+If you are new to the codebase or need full technical context, read the documentation files in this recommended sequence:
+
+| Priority | Document | What Context It Gives You |
+|:---:|---|---|
+| **1** | [**`README.md`**](README.md) | High-level system overview, quickstart setup, API endpoints, and verification testbeds. |
+| **2** | [**`docs/DEPTHWIZARD_MASTER_PLAN.md`**](docs/DEPTHWIZARD_MASTER_PLAN.md) | Master architectural blueprint, core deliverables (50% depth accuracy + 50% visualization/UX), and Unique Value Propositions. |
+| **3** | [**`docs/DEPTHWIZARD_IMPLEMENTATION_BIBLE.md`**](docs/DEPTHWIZARD_IMPLEMENTATION_BIBLE.md) | Mathematical formulations: Scale-Invariant Logarithmic (SILog) loss, Sobel Edge Gradient matching, morphological DTM/nDSM metric elevation engine, and decimation geometry. |
+| **4** | [**`docs/DEPTHWIZARD_FRONTEND_BIBLE.md`**](docs/DEPTHWIZARD_FRONTEND_BIBLE.md) | Three.js WebGL canvas pipeline, custom displacement vertex/fragment shaders, 6-DoF flythrough camera math, flood simulation shader logic, and Exaggerated Minimalism UI design. |
+| **5** | [**`MULTI_IMAGE_VERIFICATION_REPORT.md`**](MULTI_IMAGE_VERIFICATION_REPORT.md) | Empirical audit with 16 verification screenshots across 8 real satellite testbeds (`EPSG:32617`, `EPSG:32643`, sub-meter GSD, relative optical). |
+| **6** | [**`docs/GAMUS_TRAINING_PLAN.md`**](docs/GAMUS_TRAINING_PLAN.md) & [**`docs/RTX4060_EXECUTION_PLAN.md`**](docs/RTX4060_EXECUTION_PLAN.md) | Fine-tuning strategy on the GAMUS/DFC2019 dataset, differential learning rates, Cosine Annealing, and PyTorch AMP fp16 VRAM optimization. |
+| **7** | [**`graphify-out/GRAPH_REPORT.md`**](graphify-out/GRAPH_REPORT.md) & [**`graphify-out/graph.html`**](graphify-out/graph.html) | Interactive 255-node knowledge graph visualizer and architectural dependency mapping across all modules. |
+
+---
+
 ## 🏗️ System Architecture & Mathematical Engine
 
 ```mermaid
@@ -95,7 +111,7 @@ python -m venv .venv
 # source .venv/bin/activate
 
 # Install dependencies
-pip install -r backend/requirements.txt
+pip install -r requirements.txt
 ```
 
 ### Step 3: Set Up Frontend
@@ -193,6 +209,8 @@ DepthWizard/
 ├── MULTI_IMAGE_VERIFICATION_REPORT.md # Empirical verification audit report
 ├── WALKTHROUGH.md                 # Complete implementation walkthrough
 ├── DEPTHWIZARD_FULL_AUDIT.md      # Full system audit and design validation
+├── LICENSE                        # MIT Open Source License
+├── requirements.txt               # Unified Python dependencies (PyTorch, FastAPI, Rasterio, etc.)
 └── run_local.bat                  # One-click Windows launch script
 ```
 
