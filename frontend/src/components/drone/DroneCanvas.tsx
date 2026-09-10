@@ -38,6 +38,9 @@ export default function DroneCanvas({
   spawnPoint,
   onExitFpv,
 }: DroneCanvasProps) {
+  const [autopilotMode, setAutopilotMode] = useState<'manual' | 'orbit' | 'transect'>('manual');
+  const [cameraGimbal, setCameraGimbal] = useState<boolean>(false);
+
   const [telemetry, setTelemetry] = useState<FlightTelemetry>({
     speed: 0,
     verticalSpeed: 0,
@@ -49,6 +52,8 @@ export default function DroneCanvas({
     gridX: 0,
     gridZ: 0,
     sensors: { left: 50, right: 50, bottom: 25 },
+    autopilotMode: 'manual',
+    cameraGimbal: false,
   });
 
   // Global Esc key listener (§6)
@@ -85,13 +90,17 @@ export default function DroneCanvas({
           waterLevel={waterLevel}
         />
 
-        {/* Procedural drone flight rig and nose-locked FPV camera */}
+        {/* Procedural drone flight rig, autopilot, and nose/gimbal camera (§1-§7) */}
         <DroneFlightController
           spawnPoint={spawnPoint}
           dsmRaw={dsmRaw}
           meshStats={meshStats}
           verticalScale={verticalScale}
           waterLevel={waterLevel}
+          autopilotMode={autopilotMode}
+          cameraGimbal={cameraGimbal}
+          onAutopilotModeChange={setAutopilotMode}
+          onCameraGimbalToggle={() => setCameraGimbal((prev) => !prev)}
           onTelemetryUpdate={setTelemetry}
         />
 
@@ -113,6 +122,10 @@ export default function DroneCanvas({
         sensorLeft={telemetry.sensors.left}
         sensorRight={telemetry.sensors.right}
         sensorBottom={telemetry.sensors.bottom}
+        autopilotMode={telemetry.autopilotMode ?? autopilotMode}
+        cameraGimbal={telemetry.cameraGimbal ?? cameraGimbal}
+        onAutopilotModeChange={setAutopilotMode}
+        onCameraGimbalToggle={() => setCameraGimbal((prev) => !prev)}
       />
     </div>
   );

@@ -10,6 +10,8 @@ import {
   Radar,
   Radio,
   MapPin,
+  Video,
+  CircleDot,
 } from 'lucide-react';
 
 export interface DroneHUDProps {
@@ -26,11 +28,15 @@ export interface DroneHUDProps {
   sensorLeft?: number;
   sensorRight?: number;
   sensorBottom?: number;
+  autopilotMode?: 'manual' | 'orbit' | 'transect';
+  cameraGimbal?: boolean;
+  onAutopilotModeChange?: (mode: 'manual' | 'orbit' | 'transect') => void;
+  onCameraGimbalToggle?: () => void;
 }
 
 /**
- * DroneHUD (Phase 5 Polish):
- * High-fidelity 2D Heads-Up Display & On-Screen Display (OSD) overlay for FPV Drone Mode.
+ * DroneHUD (Phases 5 & 7 Polish):
+ * Tactical 2D Heads-Up Display (HUD) / On-Screen Display (OSD) overlay for FPV Drone Mode.
  * Features:
  * - Dynamic artificial horizon with multi-degree pitch ladder bars and roll angle arc
  * - Authentic rolling compass tape with cardinal/degree ticks and centered indicator
@@ -39,6 +45,8 @@ export interface DroneHUDProps {
  * - Real-time survey grid coordinates
  * - 3-Sensor proximity LIDAR cluster with color-coded warning pulses
  * - Active proximity obstacle alarm banner
+ * - Phase 7 Autopilot Mode Selector (Manual / Orbit / Transect) with instant override
+ * - Horizon-Stabilized Gimbal vs FPV Nose Camera toggle
  */
 export default function DroneHUD({
   onExitFpv,
@@ -54,6 +62,10 @@ export default function DroneHUD({
   sensorLeft = 50,
   sensorRight = 50,
   sensorBottom = 50,
+  autopilotMode = 'manual',
+  cameraGimbal = false,
+  onAutopilotModeChange,
+  onCameraGimbalToggle,
 }: DroneHUDProps) {
   const speedKmh = (speed * 3.6).toFixed(1);
   const speedMs = speed.toFixed(1);
@@ -108,35 +120,70 @@ export default function DroneHUD({
 
   return (
     <div className="absolute inset-0 pointer-events-none z-30 select-none overflow-hidden font-mono text-white">
-      {/* 1. Top Avionics & Status Header */}
+      {/* 1. Top Avionics & Flight Control Header */}
       <div className="absolute top-4 left-4 right-4 flex items-center justify-between pointer-events-auto">
-        {/* Left: Mode Badge & Exit Button */}
+        {/* Left: Exit Button & Autopilot Mode Selector (§4.3 & §7) */}
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={onExitFpv}
-            className="px-3.5 py-1.5 bg-black/85 border border-white/20 hover:border-emerald-400 hover:text-emerald-400 text-white text-xs font-bold tracking-wider flex items-center gap-1.5 transition-all shadow-xl"
+            className="px-3 py-1.5 bg-black/85 border border-white/20 hover:border-emerald-400 hover:text-emerald-400 text-white text-xs font-bold tracking-wider flex items-center gap-1.5 transition-all shadow-xl"
             title="Return to 3D Spectator Studio [ESC]"
           >
             <LogOut className="w-3.5 h-3.5 text-emerald-400" />
-            EXIT FPV [ESC]
+            EXIT [ESC]
           </button>
 
-          <div className="px-3 py-1 bg-black/80 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold tracking-widest uppercase flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            FPV RECON ACTIVE
+          {/* Autopilot Mode Selector */}
+          <div className="flex items-center bg-black/85 border border-white/15 p-0.5 text-[10px] font-bold">
+            <button
+              type="button"
+              onClick={() => onAutopilotModeChange?.('manual')}
+              className={`px-2.5 py-1 transition-all ${
+                autopilotMode === 'manual'
+                  ? 'bg-emerald-500 text-black shadow-sm font-black'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+              title="Manual Flight [Key 1]"
+            >
+              [1] MANUAL
+            </button>
+            <button
+              type="button"
+              onClick={() => onAutopilotModeChange?.('orbit')}
+              className={`px-2.5 py-1 transition-all ${
+                autopilotMode === 'orbit'
+                  ? 'bg-[#38BDF8] text-black shadow-sm font-black'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+              title="Orbital POI Recon Autopilot [Key 2]"
+            >
+              [2] ORBIT
+            </button>
+            <button
+              type="button"
+              onClick={() => onAutopilotModeChange?.('transect')}
+              className={`px-2.5 py-1 transition-all ${
+                autopilotMode === 'transect'
+                  ? 'bg-amber-400 text-black shadow-sm font-black'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+              title="Terrain-Hugging Transect Cruise [Key 3]"
+            >
+              [3] TRANSECT
+            </button>
           </div>
         </div>
 
         {/* Center: Authentic Rolling Compass Tape */}
         <div className="flex flex-col items-center">
-          <div className="flex items-center gap-1 text-[11px] font-bold text-[#38BDF8] bg-black/80 px-2 py-0.5 border border-white/10 mb-0.5">
+          <div className="flex items-center gap-1 text-[11px] font-bold text-[#38BDF8] bg-black/80 px-2 py-0.5 border border-white/10 mb-0.5 shadow-md">
             <Compass className="w-3 h-3" />
             <span>{heading.toString().padStart(3, '0')}°</span>
             <span className="text-neutral-300">({getHeadingLabel(heading)})</span>
           </div>
 
-          <div className="relative w-64 h-8 bg-black/85 border border-white/20 overflow-hidden flex items-center justify-center">
+          <div className="relative w-64 h-8 bg-black/85 border border-white/20 overflow-hidden flex items-center justify-center shadow-lg">
             {/* Compass Center Cursor Needle */}
             <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-[1.5px] bg-[#38BDF8] z-10 shadow-[0_0_6px_#38bdf8]" />
             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-[5px] border-t-[#38BDF8] z-10" />
@@ -179,22 +226,51 @@ export default function DroneHUD({
           </div>
         </div>
 
-        {/* Right: Avionics & Flight Link Status */}
+        {/* Right: Camera Gimbal Toggle & Avionics Status (§7) */}
         <div className="flex items-center gap-2">
+          {/* Stabilized Gimbal Toggle Button */}
+          <button
+            type="button"
+            onClick={onCameraGimbalToggle}
+            className={`px-2.5 py-1.5 border text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-md ${
+              cameraGimbal
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/60 shadow-emerald-500/20'
+                : 'bg-black/80 text-neutral-400 border-white/20 hover:text-white'
+            }`}
+            title="Toggle Horizon-Stabilized Gimbal [Key G]"
+          >
+            <Video className="w-3 h-3" />
+            <span>CAM: {cameraGimbal ? 'GIMBAL STAB' : 'FPV NOSE'} [G]</span>
+          </button>
+
           <div className="px-3 py-1 bg-black/80 border border-white/15 text-[10px] text-neutral-300 flex items-center gap-2 shadow-lg">
             <Radio className="w-3 h-3 text-[#38BDF8]" />
             <span>LINK: <strong className="text-emerald-400">99%</strong></span>
             <span className="text-neutral-500">|</span>
-            <span>BATT: <strong className="text-emerald-400">16.2V 4S</strong></span>
+            <span>BATT: <strong className="text-emerald-400">16.2V</strong></span>
           </div>
 
-          <div className="px-3 py-1 bg-black/80 border border-white/15 text-[10px] text-neutral-300 flex items-center gap-2 shadow-lg">
+          <div className="px-3 py-1 bg-black/80 border border-white/15 text-[10px] text-neutral-300 flex items-center gap-1.5 shadow-lg">
             <Activity className="w-3 h-3 text-[#38BDF8]" />
             <span>ARMED</span>
-            <span className="text-emerald-400 font-bold">100%</span>
           </div>
         </div>
       </div>
+
+      {/* Autopilot Status Notification Banner */}
+      {autopilotMode !== 'manual' && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-black/90 border border-[#38BDF8] text-[#38BDF8] text-xs font-bold tracking-wider uppercase flex items-center gap-2.5 shadow-2xl backdrop-blur-md animate-pulse pointer-events-none">
+          <CircleDot className="w-3.5 h-3.5 text-[#38BDF8] animate-spin" />
+          <span>
+            {autopilotMode === 'orbit'
+              ? 'AUTOPILOT ENGAGED · ORBITAL POINT-OF-INTEREST RECON'
+              : 'AUTOPILOT ENGAGED · TERRAIN-HUGGING TRANSECT (5.5M AGL)'}
+          </span>
+          <span className="text-[10px] text-neutral-400 font-normal">
+            (TOUCH WASD TO OVERRIDE)
+          </span>
+        </div>
+      )}
 
       {/* 2. Artificial Horizon & Center Pitch Ladder */}
       <div
@@ -376,11 +452,12 @@ export default function DroneHUD({
         <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">A / D</kbd> Yaw & Bank</div>
         <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">SPACE / Q</kbd> Up</div>
         <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">E</kbd> Down</div>
-        <div><kbd className="px-1 py-0.5 bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">SHIFT</kbd> Turbo</div>
+        <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">1/2/3</kbd> Autopilot</div>
+        <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">G</kbd> Gimbal</div>
       </div>
 
       {/* 8. Bottom-Right: 3-Sensor Proximity LIDAR Array Cluster (§5) */}
-      <div className="absolute bottom-4 right-6 flex items-center gap-2 p-2 bg-black/85 border border-white/15 backdrop-blur-md text-xs shadow-2xl">
+      <div className="absolute bottom-4 right-6 flex items-center gap-2 p-2.5 bg-black/85 border border-white/15 backdrop-blur-md text-xs shadow-2xl">
         <div className="flex items-center gap-1.5 text-[10px] text-neutral-400 font-bold tracking-wider px-1">
           <Radar className="w-3.5 h-3.5 text-[#38BDF8]" />
           LIDAR:

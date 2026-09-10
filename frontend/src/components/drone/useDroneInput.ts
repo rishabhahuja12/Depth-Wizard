@@ -10,7 +10,17 @@ export interface DroneInputState {
   turbo: boolean; // Shift
 }
 
-export function useDroneInput(active: boolean = true) {
+export interface DroneInputOptions {
+  onModeSelect?: (mode: 'manual' | 'orbit' | 'transect') => void;
+  onGimbalToggle?: () => void;
+}
+
+/**
+ * useDroneInput:
+ * Event-driven keyboard input listener for FPV drone flight mechanics.
+ * Maps WASD, Arrow keys, Space, Q, E, Shift, and autopilot shortcut keys (1/2/3/G).
+ */
+export function useDroneInput(active: boolean = true, options?: DroneInputOptions) {
   const inputRef = useRef<DroneInputState>({
     pitchForward: false,
     pitchBackward: false,
@@ -44,6 +54,12 @@ export function useDroneInput(active: boolean = true) {
       if (key === ' ' || key === 'q') inputRef.current.throttleUp = true;
       if (key === 'e') inputRef.current.throttleDown = true;
       if (key === 'shift') inputRef.current.turbo = true;
+
+      // Autopilot hotkey triggers (§4.3)
+      if (key === '1') options?.onModeSelect?.('manual');
+      if (key === '2') options?.onModeSelect?.('orbit');
+      if (key === '3') options?.onModeSelect?.('transect');
+      if (key === 'g') options?.onGimbalToggle?.();
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
@@ -78,7 +94,9 @@ export function useDroneInput(active: boolean = true) {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [active]);
+  }, [active, options]);
 
   return inputRef;
 }
+
+export default useDroneInput;
