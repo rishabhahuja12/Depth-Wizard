@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Canvas } from '@react-three/fiber';
+import DroneTerrainMesh from './DroneTerrainMesh.tsx';
 import DroneFlightController from './DroneFlightController.tsx';
 import DroneHUD from './DroneHUD.tsx';
 import { SensorReadings } from './ProximitySensors.tsx';
-import * as THREE from 'three';
 
 export interface DroneCanvasProps {
   heightmapB64: string;
@@ -25,6 +25,7 @@ export interface DroneCanvasProps {
 
 /**
  * DroneCanvas: Dedicated full-screen 3D FPV Drone flight viewport.
+ * Renders the 3D reconstructed terrain surface and the FPV drone with nose-locked camera.
  */
 export default function DroneCanvas({
   heightmapB64,
@@ -50,19 +51,31 @@ export default function DroneCanvas({
   return (
     <div className="w-full h-full relative select-none bg-[#050608]">
       <Canvas
-        camera={{ fov: 75, near: 0.1, far: 2000 }}
+        camera={{ fov: 75, near: 0.05, far: 2500 }}
         gl={{ antialias: true, alpha: false }}
         style={{ background: '#050608' }}
       >
-        <fog attach="fog" args={['#050608', 80, 400]} />
+        <fog attach="fog" args={['#050608', 90, 450]} />
         <ambientLight intensity={0.5} />
         <directionalLight position={[50, 80, 50]} intensity={1.3} castShadow />
         <directionalLight position={[-30, 40, -30]} intensity={0.35} />
 
+        {/* 3D Terrain mesh displaced from satellite DSM */}
+        <DroneTerrainMesh
+          heightmapB64={heightmapB64}
+          rgbB64={rgbB64}
+          normalMapB64={normalMapB64}
+          meshStats={meshStats}
+          verticalScale={verticalScale}
+          waterLevel={waterLevel}
+        />
+
+        {/* Procedural drone flight rig and nose-locked FPV camera */}
         <DroneFlightController
           spawnPoint={spawnPoint}
           dsmRaw={dsmRaw}
           meshStats={meshStats}
+          verticalScale={verticalScale}
           onTelemetryUpdate={setTelemetry}
         />
 
