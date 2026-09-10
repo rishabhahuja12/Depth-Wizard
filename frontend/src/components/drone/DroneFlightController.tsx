@@ -11,6 +11,19 @@ import {
   resolveTerrainCollision,
 } from './dsmSampling.ts';
 
+export interface FlightTelemetry {
+  speed: number;
+  verticalSpeed: number;
+  altitudeMsl: number;
+  altitudeAgl: number;
+  heading: number;
+  pitch: number;
+  roll: number;
+  gridX: number;
+  gridZ: number;
+  sensors: SensorReadings;
+}
+
 export interface DroneFlightControllerProps {
   spawnPoint?: [number, number, number];
   dsmRaw: number[][];
@@ -23,15 +36,7 @@ export interface DroneFlightControllerProps {
   };
   verticalScale?: number;
   waterLevel?: number;
-  onTelemetryUpdate?: (telemetry: {
-    speed: number;
-    altitudeMsl: number;
-    altitudeAgl: number;
-    heading: number;
-    pitch: number;
-    roll: number;
-    sensors: SensorReadings;
-  }) => void;
+  onTelemetryUpdate?: (telemetry: FlightTelemetry) => void;
 }
 
 /**
@@ -237,11 +242,14 @@ export default function DroneFlightController({
 
       onTelemetryUpdate({
         speed: currentSpeed,
+        verticalSpeed: collision.velocity.y,
         altitudeMsl: mslMeters,
         altitudeAgl: aglMeters,
         heading: Math.round(headingDeg),
         pitch: THREE.MathUtils.radToDeg(pitch.current),
         roll: THREE.MathUtils.radToDeg(roll.current),
+        gridX: collision.position.x,
+        gridZ: collision.position.z,
         sensors: {
           left: sensors.left,
           right: sensors.right,

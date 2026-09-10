@@ -1,33 +1,56 @@
-import React from 'react';
-import { Crosshair, LogOut, Compass, Gauge, ArrowUp, Activity, AlertTriangle, Radar } from 'lucide-react';
+import React, { useMemo } from 'react';
+import {
+  LogOut,
+  Compass,
+  Gauge,
+  ArrowUp,
+  ArrowDown,
+  Activity,
+  AlertTriangle,
+  Radar,
+  Radio,
+  MapPin,
+} from 'lucide-react';
 
 export interface DroneHUDProps {
   onExitFpv: () => void;
   speed?: number;
+  verticalSpeed?: number;
   altitudeMsl?: number;
   altitudeAgl?: number;
   heading?: number;
   pitch?: number;
   roll?: number;
+  gridX?: number;
+  gridZ?: number;
   sensorLeft?: number;
   sensorRight?: number;
   sensorBottom?: number;
-  coordinates?: string;
 }
 
 /**
- * DroneHUD:
- * 2D FPV OSD overlay with live telemetry, artificial horizon ladder,
- * heading indicator, speed gauge, 3-sensor LIDAR cluster, and terrain alerts.
+ * DroneHUD (Phase 5 Polish):
+ * High-fidelity 2D Heads-Up Display & On-Screen Display (OSD) overlay for FPV Drone Mode.
+ * Features:
+ * - Dynamic artificial horizon with multi-degree pitch ladder bars and roll angle arc
+ * - Authentic rolling compass tape with cardinal/degree ticks and centered indicator
+ * - Dual airspeed gauges (m/s & km/h) with visual thrust bar
+ * - MSL altitude and radar AGL clearance with Vertical Speed Indicator (VSI)
+ * - Real-time survey grid coordinates
+ * - 3-Sensor proximity LIDAR cluster with color-coded warning pulses
+ * - Active proximity obstacle alarm banner
  */
 export default function DroneHUD({
   onExitFpv,
   speed = 0,
+  verticalSpeed = 0,
   altitudeMsl = 0,
   altitudeAgl = 0,
   heading = 0,
   pitch = 0,
   roll = 0,
+  gridX = 0,
+  gridZ = 0,
   sensorLeft = 50,
   sensorRight = 50,
   sensorBottom = 50,
@@ -35,9 +58,9 @@ export default function DroneHUD({
   const speedKmh = (speed * 3.6).toFixed(1);
   const speedMs = speed.toFixed(1);
 
-  // Compass heading direction
+  // Compass heading direction label
   const getHeadingLabel = (deg: number) => {
-    const d = (deg % 360 + 360) % 360;
+    const d = ((deg % 360) + 360) % 360;
     if (d >= 337.5 || d < 22.5) return 'N';
     if (d >= 22.5 && d < 67.5) return 'NE';
     if (d >= 67.5 && d < 112.5) return 'E';
@@ -48,15 +71,52 @@ export default function DroneHUD({
     return 'NW';
   };
 
+  // Rolling compass tape generation: continuous ticks across visible window
+  const visibleTicks = useMemo(() => {
+    const ticks: { deg: number; label?: string; isMajor: boolean; offsetPx: number }[] = [];
+    const minDeg = Math.floor((heading - 45) / 5) * 5;
+    const maxDeg = Math.ceil((heading + 45) / 5) * 5;
+
+    for (let d = minDeg; d <= maxDeg; d += 5) {
+      const normalized = ((d % 360) + 360) % 360;
+      const offsetPx = (d - heading) * 3.2;
+      let label: string | undefined = undefined;
+
+      if (normalized === 0) label = 'N';
+      else if (normalized === 45) label = 'NE';
+      else if (normalized === 90) label = 'E';
+      else if (normalized === 135) label = 'SE';
+      else if (normalized === 180) label = 'S';
+      else if (normalized === 225) label = 'SW';
+      else if (normalized === 270) label = 'W';
+      else if (normalized === 315) label = 'NW';
+      else if (normalized % 15 === 0) {
+        label = normalized.toString().padStart(3, '0');
+      }
+
+      ticks.push({
+        deg: normalized,
+        label,
+        isMajor: d % 15 === 0,
+        offsetPx,
+      });
+    }
+    return ticks;
+  }, [heading]);
+
+  const hasProximityAlert = sensorLeft < 3 || sensorRight < 3 || sensorBottom < 2.0;
+
   return (
     <div className="absolute inset-0 pointer-events-none z-30 select-none overflow-hidden font-mono text-white">
-      {/* 1. Top Status & Exit Header */}
+      {/* 1. Top Avionics & Status Header */}
       <div className="absolute top-4 left-4 right-4 flex items-center justify-between pointer-events-auto">
+        {/* Left: Mode Badge & Exit Button */}
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={onExitFpv}
             className="px-3.5 py-1.5 bg-black/85 border border-white/20 hover:border-emerald-400 hover:text-emerald-400 text-white text-xs font-bold tracking-wider flex items-center gap-1.5 transition-all shadow-xl"
+            title="Return to 3D Spectator Studio [ESC]"
           >
             <LogOut className="w-3.5 h-3.5 text-emerald-400" />
             EXIT FPV [ESC]
@@ -64,113 +124,263 @@ export default function DroneHUD({
 
           <div className="px-3 py-1 bg-black/80 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold tracking-widest uppercase flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            FPV DRONE ACTIVE
+            FPV RECON ACTIVE
           </div>
         </div>
 
-        {/* Top Center Compass Tape */}
-        <div className="flex items-center gap-2 px-4 py-1.5 bg-black/85 border border-white/15 text-xs">
-          <Compass className="w-3.5 h-3.5 text-[#38BDF8]" />
-          <span className="text-neutral-400">HDG:</span>
-          <span className="text-[#38BDF8] font-bold">{heading.toString().padStart(3, '0')}°</span>
-          <span className="text-neutral-300 font-bold ml-1">({getHeadingLabel(heading)})</span>
+        {/* Center: Authentic Rolling Compass Tape */}
+        <div className="flex flex-col items-center">
+          <div className="flex items-center gap-1 text-[11px] font-bold text-[#38BDF8] bg-black/80 px-2 py-0.5 border border-white/10 mb-0.5">
+            <Compass className="w-3 h-3" />
+            <span>{heading.toString().padStart(3, '0')}°</span>
+            <span className="text-neutral-300">({getHeadingLabel(heading)})</span>
+          </div>
+
+          <div className="relative w-64 h-8 bg-black/85 border border-white/20 overflow-hidden flex items-center justify-center">
+            {/* Compass Center Cursor Needle */}
+            <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-[1.5px] bg-[#38BDF8] z-10 shadow-[0_0_6px_#38bdf8]" />
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-[5px] border-t-[#38BDF8] z-10" />
+
+            {/* Moving ticks container */}
+            <div className="absolute inset-0 flex items-center justify-center">
+              {visibleTicks.map((tick, idx) => (
+                <div
+                  key={idx}
+                  className="absolute flex flex-col items-center"
+                  style={{ transform: `translateX(${tick.offsetPx}px)` }}
+                >
+                  <div
+                    className={`${
+                      tick.isMajor
+                        ? 'h-3 w-[1.5px] bg-white'
+                        : 'h-1.5 w-[1px] bg-white/40'
+                    }`}
+                  />
+                  {tick.label && (
+                    <span
+                      className={`text-[8px] font-bold tracking-tighter mt-0.5 ${
+                        tick.label === 'N'
+                          ? 'text-red-400 font-black'
+                          : tick.label.length === 2
+                          ? 'text-[#38BDF8]'
+                          : 'text-neutral-300'
+                      }`}
+                    >
+                      {tick.label}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Edge Fade Gradients */}
+            <div className="absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-black via-black/80 to-transparent z-10 pointer-events-none" />
+            <div className="absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-black via-black/80 to-transparent z-10 pointer-events-none" />
+          </div>
         </div>
 
-        {/* Right Status Badge */}
-        <div className="px-3 py-1 bg-black/80 border border-white/15 text-[10px] text-neutral-400 flex items-center gap-2">
-          <Activity className="w-3 h-3 text-[#38BDF8]" />
-          <span>MOTORS ARMED</span>
-          <span className="text-emerald-400 font-bold">100% THRUST</span>
+        {/* Right: Avionics & Flight Link Status */}
+        <div className="flex items-center gap-2">
+          <div className="px-3 py-1 bg-black/80 border border-white/15 text-[10px] text-neutral-300 flex items-center gap-2 shadow-lg">
+            <Radio className="w-3 h-3 text-[#38BDF8]" />
+            <span>LINK: <strong className="text-emerald-400">99%</strong></span>
+            <span className="text-neutral-500">|</span>
+            <span>BATT: <strong className="text-emerald-400">16.2V 4S</strong></span>
+          </div>
+
+          <div className="px-3 py-1 bg-black/80 border border-white/15 text-[10px] text-neutral-300 flex items-center gap-2 shadow-lg">
+            <Activity className="w-3 h-3 text-[#38BDF8]" />
+            <span>ARMED</span>
+            <span className="text-emerald-400 font-bold">100%</span>
+          </div>
         </div>
       </div>
 
-      {/* 2. Artificial Horizon / Center Pitch Ladder */}
+      {/* 2. Artificial Horizon & Center Pitch Ladder */}
       <div
         className="absolute inset-0 flex items-center justify-center transition-transform duration-75 ease-out"
         style={{
           transform: `rotate(${-roll}deg) translateY(${pitch * 4}px)`,
         }}
       >
-        {/* Pitch Ladder Bars */}
-        <div className="relative w-64 h-64 flex items-center justify-center">
-          {/* Horizon Line */}
-          <div className="w-48 h-[1.5px] bg-emerald-400/70 shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
-
-          {/* +10 deg pitch mark */}
-          <div className="absolute top-16 w-20 flex justify-between border-t border-emerald-400/40 text-[9px] text-emerald-400">
-            <span>+10</span>
-            <span>+10</span>
+        <div className="relative w-80 h-80 flex items-center justify-center pointer-events-none">
+          {/* Horizon Line (0 deg pitch) with center gap */}
+          <div className="absolute w-64 flex items-center justify-between">
+            <div className="w-24 h-[1.5px] bg-emerald-400/80 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
+            <div className="w-24 h-[1.5px] bg-emerald-400/80 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
           </div>
 
-          {/* -10 deg pitch mark */}
-          <div className="absolute bottom-16 w-20 flex justify-between border-b border-emerald-400/40 text-[9px] text-emerald-400">
-            <span>-10</span>
-            <span>-10</span>
+          {/* +20 deg pitch rung */}
+          <div className="absolute top-6 w-32 flex justify-between text-[9px] text-emerald-400 font-bold">
+            <div className="flex items-start gap-1">
+              <span>+20</span>
+              <div className="w-8 border-t-2 border-l-2 border-emerald-400/60 h-2" />
+            </div>
+            <div className="flex items-start gap-1">
+              <div className="w-8 border-t-2 border-r-2 border-emerald-400/60 h-2" />
+              <span>+20</span>
+            </div>
+          </div>
+
+          {/* +10 deg pitch rung */}
+          <div className="absolute top-20 w-24 flex justify-between text-[9px] text-emerald-400 font-bold">
+            <div className="flex items-start gap-1">
+              <span>+10</span>
+              <div className="w-6 border-t border-l border-emerald-400/50 h-1.5" />
+            </div>
+            <div className="flex items-start gap-1">
+              <div className="w-6 border-t border-r border-emerald-400/50 h-1.5" />
+              <span>+10</span>
+            </div>
+          </div>
+
+          {/* -10 deg pitch rung (dashed) */}
+          <div className="absolute bottom-20 w-24 flex justify-between text-[9px] text-emerald-400/80 font-bold">
+            <div className="flex items-end gap-1">
+              <span>-10</span>
+              <div className="w-6 border-b border-l border-dashed border-emerald-400/50 h-1.5" />
+            </div>
+            <div className="flex items-end gap-1">
+              <div className="w-6 border-b border-r border-dashed border-emerald-400/50 h-1.5" />
+              <span>-10</span>
+            </div>
+          </div>
+
+          {/* -20 deg pitch rung (dashed) */}
+          <div className="absolute bottom-6 w-32 flex justify-between text-[9px] text-emerald-400/80 font-bold">
+            <div className="flex items-end gap-1">
+              <span>-20</span>
+              <div className="w-8 border-b-2 border-l-2 border-dashed border-emerald-400/60 h-2" />
+            </div>
+            <div className="flex items-end gap-1">
+              <div className="w-8 border-b-2 border-r-2 border-dashed border-emerald-400/60 h-2" />
+              <span>-20</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* 3. Static Center Crosshair Reticle */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="relative">
-          <Crosshair className="w-8 h-8 text-emerald-400/80 stroke-[1.5]" />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 bg-emerald-400 rounded-full" />
+      {/* 3. Static Center Boresight & Crosshair */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="relative flex items-center justify-center">
+          {/* Outer Crosshair Wings */}
+          <div className="absolute -left-12 w-6 h-[1.5px] bg-emerald-400/70" />
+          <div className="absolute -right-12 w-6 h-[1.5px] bg-emerald-400/70" />
+          <div className="absolute -top-12 h-6 w-[1.5px] bg-emerald-400/70" />
+
+          {/* Center Flight Pip */}
+          <div className="w-6 h-6 border border-emerald-400/60 rounded-full flex items-center justify-center">
+            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full shadow-[0_0_6px_#34d399]" />
+          </div>
         </div>
       </div>
 
-      {/* 4. Left Flight Telemetry: Speed & Pitch */}
-      <div className="absolute left-6 top-1/2 -translate-y-1/2 p-3 bg-black/85 border border-white/15 space-y-2 text-xs shadow-2xl backdrop-blur-md">
+      {/* 4. Left Flight Telemetry: Airspeed & Attitude */}
+      <div className="absolute left-6 top-1/2 -translate-y-1/2 p-3 bg-black/85 border border-white/15 space-y-2.5 text-xs shadow-2xl backdrop-blur-md">
         <div className="flex items-center gap-1.5 text-neutral-400 text-[10px] uppercase font-bold tracking-wider">
-          <Gauge className="w-3 h-3 text-[#38BDF8]" />
+          <Gauge className="w-3.5 h-3.5 text-[#38BDF8]" />
           AIRSPEED
         </div>
-        <div className="text-xl font-black text-white tracking-tight">
-          {speedMs} <span className="text-[10px] text-neutral-400 font-normal">M/S</span>
+
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-2xl font-black text-white tracking-tight">{speedMs}</span>
+          <span className="text-[10px] text-neutral-400 font-bold">M/S</span>
         </div>
+
         <div className="text-[10px] text-neutral-400">
-          {speedKmh} <span className="text-[9px] text-neutral-500">KM/H</span>
+          GROUND SPD: <strong className="text-neutral-200">{speedKmh} KM/H</strong>
         </div>
-        <div className="pt-2 border-t border-white/10 text-[10px] space-y-0.5">
-          <div className="flex justify-between gap-3">
+
+        {/* Speed Bar Gauge */}
+        <div className="w-32 h-1.5 bg-neutral-800 rounded-full overflow-hidden border border-white/10">
+          <div
+            className="h-full bg-gradient-to-r from-emerald-500 to-[#38BDF8] transition-all duration-75"
+            style={{ width: `${Math.min(100, (speed / 25) * 100)}%` }}
+          />
+        </div>
+
+        <div className="pt-2 border-t border-white/10 text-[10px] space-y-1">
+          <div className="flex justify-between gap-4">
             <span className="text-neutral-500">PITCH:</span>
-            <span className="text-neutral-300 font-bold">{pitch.toFixed(1)}°</span>
+            <span className="text-neutral-200 font-bold">{pitch >= 0 ? `+${pitch.toFixed(1)}°` : `${pitch.toFixed(1)}°`}</span>
           </div>
-          <div className="flex justify-between gap-3">
+          <div className="flex justify-between gap-4">
             <span className="text-neutral-500">BANK:</span>
-            <span className="text-neutral-300 font-bold">{roll.toFixed(1)}°</span>
+            <span className="text-neutral-200 font-bold">{roll >= 0 ? `+${roll.toFixed(1)}°` : `${roll.toFixed(1)}°`}</span>
           </div>
         </div>
       </div>
 
-      {/* 5. Right Flight Telemetry: Altitude */}
-      <div className="absolute right-6 top-1/2 -translate-y-1/2 p-3 bg-black/85 border border-white/15 space-y-2 text-xs shadow-2xl backdrop-blur-md text-right">
+      {/* 5. Right Flight Telemetry: Altitude & VSI */}
+      <div className="absolute right-6 top-1/2 -translate-y-1/2 p-3 bg-black/85 border border-white/15 space-y-2.5 text-xs shadow-2xl backdrop-blur-md text-right">
         <div className="flex items-center justify-end gap-1.5 text-neutral-400 text-[10px] uppercase font-bold tracking-wider">
-          <ArrowUp className="w-3 h-3 text-[#34D399]" />
-          ALTITUDE MSL
+          <ArrowUp className="w-3.5 h-3.5 text-[#34D399]" />
+          ALTITUDE (MSL)
         </div>
-        <div className="text-xl font-black text-white tracking-tight">
-          {altitudeMsl.toFixed(1)} <span className="text-[10px] text-neutral-400 font-normal">M</span>
+
+        <div className="flex items-baseline justify-end gap-1.5">
+          <span className="text-2xl font-black text-white tracking-tight">{altitudeMsl.toFixed(1)}</span>
+          <span className="text-[10px] text-neutral-400 font-bold">M</span>
         </div>
+
         <div className="text-[10px] text-neutral-400">
-          RADAR AGL: <span className="text-emerald-400 font-bold">{altitudeAgl.toFixed(1)} M</span>
+          RADAR AGL: <strong className="text-emerald-400">{altitudeAgl.toFixed(1)} M</strong>
         </div>
+
+        {/* Vertical Speed Indicator (VSI) */}
+        <div className="flex items-center justify-end gap-1.5 text-[10px]">
+          <span className="text-neutral-500">VSI:</span>
+          <span className={`font-bold flex items-center gap-0.5 ${
+            verticalSpeed > 0.3
+              ? 'text-emerald-400'
+              : verticalSpeed < -0.3
+              ? 'text-amber-400'
+              : 'text-neutral-400'
+          }`}>
+            {verticalSpeed > 0.3 ? (
+              <ArrowUp className="w-3 h-3" />
+            ) : verticalSpeed < -0.3 ? (
+              <ArrowDown className="w-3 h-3" />
+            ) : null}
+            {verticalSpeed >= 0 ? `+${verticalSpeed.toFixed(1)}` : verticalSpeed.toFixed(1)} M/S
+          </span>
+        </div>
+
         <div className="pt-2 border-t border-white/10 text-[10px] text-neutral-500">
-          VERTICAL DATUM: ELLIPSOID
+          DATUM: WGS84 / EGM96
         </div>
       </div>
 
-      {/* 6. Bottom Controls Helper */}
-      <div className="absolute bottom-4 left-6 p-2.5 bg-black/85 border border-white/15 text-[10px] text-neutral-300 flex items-center gap-3 backdrop-blur-md">
-        <div className="text-emerald-400 font-bold">FPV FLIGHT:</div>
+      {/* 6. Bottom-Left: Survey Grid Position */}
+      <div className="absolute bottom-4 left-6 flex items-center gap-3 p-2.5 bg-black/85 border border-white/15 text-[10px] text-neutral-300 backdrop-blur-md shadow-2xl">
+        <div className="flex items-center gap-1.5 text-[#38BDF8] font-bold">
+          <MapPin className="w-3.5 h-3.5" />
+          <span>GRID:</span>
+        </div>
+        <div>
+          X: <strong className="text-white">{gridX >= 0 ? `+${gridX.toFixed(1)}` : gridX.toFixed(1)}m</strong>
+        </div>
+        <div>
+          Z: <strong className="text-white">{gridZ >= 0 ? `+${gridZ.toFixed(1)}` : gridZ.toFixed(1)}m</strong>
+        </div>
+        <div className="text-neutral-500">|</div>
+        <div className="text-neutral-400">
+          RTK FIX <strong className="text-emerald-400">±2CM</strong>
+        </div>
+      </div>
+
+      {/* 7. Bottom-Center: Flight Controls Cheat Sheet */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 p-2 bg-black/85 border border-white/15 text-[10px] text-neutral-300 flex items-center gap-2.5 backdrop-blur-md shadow-2xl">
+        <div className="text-emerald-400 font-bold">CONTROLS:</div>
         <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">W / S</kbd> Thrust</div>
         <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">A / D</kbd> Yaw & Bank</div>
-        <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">SPACE / Q</kbd> Ascend</div>
-        <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">E</kbd> Descend</div>
-        <div><kbd className="px-1 py-0.5 bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">SHIFT</kbd> Turbo 2.6×</div>
+        <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">SPACE / Q</kbd> Up</div>
+        <div><kbd className="px-1 py-0.5 bg-white/10 text-white font-bold border border-white/20">E</kbd> Down</div>
+        <div><kbd className="px-1 py-0.5 bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">SHIFT</kbd> Turbo</div>
       </div>
 
-      {/* 7. 3-Sensor Proximity LIDAR Array Cluster (§5) */}
-      <div className="absolute bottom-4 right-6 flex items-center gap-2 p-2.5 bg-black/85 border border-white/15 backdrop-blur-md text-xs shadow-2xl">
+      {/* 8. Bottom-Right: 3-Sensor Proximity LIDAR Array Cluster (§5) */}
+      <div className="absolute bottom-4 right-6 flex items-center gap-2 p-2 bg-black/85 border border-white/15 backdrop-blur-md text-xs shadow-2xl">
         <div className="flex items-center gap-1.5 text-[10px] text-neutral-400 font-bold tracking-wider px-1">
           <Radar className="w-3.5 h-3.5 text-[#38BDF8]" />
           LIDAR:
@@ -219,8 +429,8 @@ export default function DroneHUD({
         </div>
       </div>
 
-      {/* 8. Proximity Obstacle Warning Alert */}
-      {(sensorLeft < 3 || sensorRight < 3 || sensorBottom < 2) && (
+      {/* 9. Proximity Obstacle Warning Alert Banner */}
+      {hasProximityAlert && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-red-500/25 border border-red-500 text-red-400 font-bold text-xs tracking-widest uppercase flex items-center gap-2 shadow-2xl animate-pulse">
           <AlertTriangle className="w-4 h-4 text-red-400" />
           <span>PROXIMITY WARNING - TERRAIN OBSTACLE CLOSE</span>

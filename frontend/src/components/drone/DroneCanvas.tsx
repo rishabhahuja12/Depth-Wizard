@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import DroneTerrainMesh from './DroneTerrainMesh.tsx';
-import DroneFlightController from './DroneFlightController.tsx';
+import DroneFlightController, { FlightTelemetry } from './DroneFlightController.tsx';
 import DroneHUD from './DroneHUD.tsx';
 import { SensorReadings } from './ProximitySensors.tsx';
 
@@ -38,15 +38,30 @@ export default function DroneCanvas({
   spawnPoint,
   onExitFpv,
 }: DroneCanvasProps) {
-  const [telemetry, setTelemetry] = useState({
+  const [telemetry, setTelemetry] = useState<FlightTelemetry>({
     speed: 0,
+    verticalSpeed: 0,
     altitudeMsl: 0,
     altitudeAgl: 0,
     heading: 0,
     pitch: 0,
     roll: 0,
-    sensors: { left: 50, right: 50, bottom: 25 } as SensorReadings,
+    gridX: 0,
+    gridZ: 0,
+    sensors: { left: 50, right: 50, bottom: 25 },
   });
+
+  // Global Esc key listener (§6)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onExitFpv();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onExitFpv]);
 
   return (
     <div className="w-full h-full relative select-none bg-[#050608]">
@@ -87,11 +102,14 @@ export default function DroneCanvas({
       <DroneHUD
         onExitFpv={onExitFpv}
         speed={telemetry.speed}
+        verticalSpeed={telemetry.verticalSpeed}
         altitudeMsl={telemetry.altitudeMsl}
         altitudeAgl={telemetry.altitudeAgl}
         heading={telemetry.heading}
         pitch={telemetry.pitch}
         roll={telemetry.roll}
+        gridX={telemetry.gridX}
+        gridZ={telemetry.gridZ}
         sensorLeft={telemetry.sensors.left}
         sensorRight={telemetry.sensors.right}
         sensorBottom={telemetry.sensors.bottom}
