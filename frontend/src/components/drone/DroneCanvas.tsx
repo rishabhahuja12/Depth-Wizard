@@ -76,6 +76,7 @@ export default function DroneCanvas({
           dsmRaw={dsmRaw}
           meshStats={meshStats}
           verticalScale={verticalScale}
+          waterLevel={waterLevel}
           onTelemetryUpdate={setTelemetry}
         />
 

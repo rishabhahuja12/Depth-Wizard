@@ -4,6 +4,12 @@ import * as THREE from 'three';
 import DroneModel from './DroneModel.tsx';
 import ProximitySensors, { SensorReadings } from './ProximitySensors.tsx';
 import { useDroneInput } from './useDroneInput.ts';
+import {
+  getTerrainElevationAt,
+  computeAgl,
+  computeMsl,
+  resolveTerrainCollision,
+} from './dsmSampling.ts';
 
 export interface DroneFlightControllerProps {
   spawnPoint?: [number, number, number];
@@ -16,6 +22,7 @@ export interface DroneFlightControllerProps {
     elevation_range: number;
   };
   verticalScale?: number;
+  waterLevel?: number;
   onTelemetryUpdate?: (telemetry: {
     speed: number;
     altitudeMsl: number;
@@ -37,6 +44,7 @@ export default function DroneFlightController({
   dsmRaw,
   meshStats,
   verticalScale = 1.0,
+  waterLevel,
   onTelemetryUpdate,
 }: DroneFlightControllerProps) {
   const droneGroupRef = useRef<THREE.Group>(null);
@@ -55,15 +63,25 @@ export default function DroneFlightController({
   // Prop spin animation state for DroneModel
   const [propAngle, setPropAngle] = useState(0);
 
-  // Compute initial spawn altitude
+  // Compute initial safe spawn altitude above terrain surface
   const isRelative = (meshStats?.elevation_range ?? 0) <= 2.0;
   const maxElevWorld = isRelative
     ? 18.0 * verticalScale
     : (meshStats.elevation_max - meshStats.elevation_min) * verticalScale * 0.1;
 
-  const initialY = spawnPoint ? spawnPoint[1] : Math.max(16, maxElevWorld + 10.0);
   const initialX = spawnPoint ? spawnPoint[0] : 0;
   const initialZ = spawnPoint ? spawnPoint[2] : 0;
+  const spawnGroundY = getTerrainElevationAt(
+    initialX,
+    initialZ,
+    dsmRaw,
+    meshStats,
+    verticalScale,
+    waterLevel
+  );
+  const initialY = spawnPoint
+    ? spawnPoint[1]
+    : Math.max(16, spawnGroundY + 10.0, maxElevWorld + 8.0);
 
   // Initialize drone transform on mount
   useLayoutEffect(() => {
@@ -129,49 +147,84 @@ export default function DroneFlightController({
     const accel = thrustVec.clone().sub(velocity.current.clone().multiplyScalar(dragCoeff));
     velocity.current.add(accel.multiplyScalar(dt));
 
-    // Update position
-    droneGroupRef.current.position.add(velocity.current.clone().multiplyScalar(dt));
+    // 5. Phase 3: Terrain Clearance & Collision Resolution (§5)
+    const prevPos = droneGroupRef.current.position.clone();
+    const candidatePos = prevPos.clone().add(velocity.current.clone().multiplyScalar(dt));
 
-    // 5. Thrust-pitch coupling (§4): nose dips 5-15 deg under forward acceleration
+    const collision = resolveTerrainCollision(
+      prevPos,
+      candidatePos,
+      velocity.current,
+      dsmRaw,
+      meshStats,
+      verticalScale,
+      waterLevel,
+      1.2 // Minimum hard-floor & rooftop clearance
+    );
+
+    droneGroupRef.current.position.set(
+      collision.position.x,
+      collision.position.y,
+      collision.position.z
+    );
+    velocity.current.set(
+      collision.velocity.x,
+      collision.velocity.y,
+      collision.velocity.z
+    );
+
+    // 6. Thrust-pitch coupling (§4): nose dips 5-15 deg under forward acceleration
     const forwardSpeed = velocity.current.dot(forwardVec);
     const lateralSpeed = velocity.current.dot(rightVec);
     const targetPitch = Math.max(-0.26, Math.min(0.18, -forwardSpeed * 0.012));
     pitch.current = THREE.MathUtils.lerp(pitch.current, targetPitch, 8 * dt);
 
-    // 6. Auto-bank roll into turns (§4): roll proportional to lateral velocity and yaw rate
+    // 7. Auto-bank roll into turns (§4): roll proportional to lateral velocity and yaw rate
     const targetRoll = Math.max(-0.45, Math.min(0.45, -lateralSpeed * 0.04 - yawRate * 0.12));
     roll.current = THREE.MathUtils.lerp(roll.current, targetRoll, 10 * dt);
 
     // Apply orientation in YXZ Euler order
     droneGroupRef.current.rotation.set(pitch.current, yaw.current, roll.current, 'YXZ');
 
-    // 7. Rigid nose-locked FPV camera: rigidly pinned to front nose pod
+    // 8. Rigid nose-locked FPV camera: rigidly pinned to front nose pod
     const noseOffset = new THREE.Vector3(0, 0.08, -0.38);
     noseOffset.applyQuaternion(droneGroupRef.current.quaternion);
     camera.position.copy(droneGroupRef.current.position).add(noseOffset);
     camera.quaternion.copy(droneGroupRef.current.quaternion);
 
-    // 8. Propeller spin speed tied to throttle magnitude (§4)
+    // 9. Propeller spin speed tied to throttle magnitude (§4)
     const currentSpeed = velocity.current.length();
     const hasThrustInput = input.pitchForward || input.pitchBackward || input.throttleUp || input.throttleDown || Math.abs(yawRate) > 0;
     const spinRate = (hasThrustInput ? (input.turbo ? 75 : 45) : 18) + currentSpeed * 0.7;
     propRotation.current += spinRate * dt;
     setPropAngle(propRotation.current);
 
-    // 9. Emit telemetry to HUD
+    // 10. Emit telemetry to HUD
     if (onTelemetryUpdate) {
       // Heading in degrees: 0 deg North (-Z), 90 deg East (+X), 180 deg South (+Z), 270 deg West (-X)
       let headingDeg = THREE.MathUtils.radToDeg(-yaw.current);
       if (headingDeg < 0) headingDeg += 360;
 
+      const aglMeters = computeAgl(
+        collision.position.y,
+        collision.groundWorldY,
+        meshStats,
+        verticalScale
+      );
+      const mslMeters = computeMsl(
+        collision.position.y,
+        meshStats,
+        verticalScale
+      );
+
       onTelemetryUpdate({
         speed: currentSpeed,
-        altitudeMsl: droneGroupRef.current.position.y,
-        altitudeAgl: droneGroupRef.current.position.y, // Refined in Phase 3
+        altitudeMsl: mslMeters,
+        altitudeAgl: aglMeters,
         heading: Math.round(headingDeg),
         pitch: THREE.MathUtils.radToDeg(pitch.current),
         roll: THREE.MathUtils.radToDeg(roll.current),
-        sensors: { left: 50, right: 50, bottom: droneGroupRef.current.position.y },
+        sensors: { left: 50, right: 50, bottom: aglMeters },
       });
     }
   });
