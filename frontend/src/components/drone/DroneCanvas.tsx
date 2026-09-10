@@ -1,0 +1,87 @@
+import React, { useState } from 'react';
+import { Canvas } from '@react-three/fiber';
+import DroneFlightController from './DroneFlightController.tsx';
+import DroneHUD from './DroneHUD.tsx';
+import { SensorReadings } from './ProximitySensors.tsx';
+import * as THREE from 'three';
+
+export interface DroneCanvasProps {
+  heightmapB64: string;
+  rgbB64: string;
+  normalMapB64?: string;
+  meshStats: {
+    width: number;
+    height: number;
+    elevation_min: number;
+    elevation_max: number;
+    elevation_range: number;
+  };
+  verticalScale: number;
+  waterLevel: number;
+  dsmRaw: number[][];
+  spawnPoint?: [number, number, number];
+  onExitFpv: () => void;
+}
+
+/**
+ * DroneCanvas: Dedicated full-screen 3D FPV Drone flight viewport.
+ */
+export default function DroneCanvas({
+  heightmapB64,
+  rgbB64,
+  normalMapB64,
+  meshStats,
+  verticalScale,
+  waterLevel,
+  dsmRaw,
+  spawnPoint,
+  onExitFpv,
+}: DroneCanvasProps) {
+  const [telemetry, setTelemetry] = useState({
+    speed: 0,
+    altitudeMsl: 0,
+    altitudeAgl: 0,
+    heading: 0,
+    pitch: 0,
+    roll: 0,
+    sensors: { left: 50, right: 50, bottom: 25 } as SensorReadings,
+  });
+
+  return (
+    <div className="w-full h-full relative select-none bg-[#050608]">
+      <Canvas
+        camera={{ fov: 75, near: 0.1, far: 2000 }}
+        gl={{ antialias: true, alpha: false }}
+        style={{ background: '#050608' }}
+      >
+        <fog attach="fog" args={['#050608', 80, 400]} />
+        <ambientLight intensity={0.5} />
+        <directionalLight position={[50, 80, 50]} intensity={1.3} castShadow />
+        <directionalLight position={[-30, 40, -30]} intensity={0.35} />
+
+        <DroneFlightController
+          spawnPoint={spawnPoint}
+          dsmRaw={dsmRaw}
+          meshStats={meshStats}
+          onTelemetryUpdate={setTelemetry}
+        />
+
+        <gridHelper args={[200, 50, '#1e293b', '#1e293b']} position={[0, -0.05, 0]} />
+      </Canvas>
+
+      {/* 2D FPV Heads-Up Display Overlay */}
+      <DroneHUD
+        onExitFpv={onExitFpv}
+        speed={telemetry.speed}
+        altitudeMsl={telemetry.altitudeMsl}
+        altitudeAgl={telemetry.altitudeAgl}
+        heading={telemetry.heading}
+        pitch={telemetry.pitch}
+        roll={telemetry.roll}
+        sensorLeft={telemetry.sensors.left}
+        sensorRight={telemetry.sensors.right}
+        sensorBottom={telemetry.sensors.bottom}
+      />
+    </div>
+  );
+}

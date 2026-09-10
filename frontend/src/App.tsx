@@ -5,6 +5,9 @@ import DualViewer from './components/DualViewer';
 import TerrainCanvas from './components/TerrainCanvas';
 import VoxelTerrain from './components/VoxelTerrain';
 import Minimap from './components/Minimap';
+import { useFlightMode } from './hooks/useFlightMode';
+import DroneCanvas from './components/drone/DroneCanvas';
+import { Radio } from 'lucide-react';
 import FloodSimulator from './components/FloodSimulator';
 import CrossSection from './components/CrossSection';
 import SettingsPanel from './components/SettingsPanel';
@@ -25,6 +28,7 @@ import {
 
 export default function App() {
   const { upload, data, loading, error, progress, reset } = useInference();
+  const { isFpv, toggleFlightMode, exitFpv } = useFlightMode('studio');
 
   // UI state
   const [verticalScale, setVerticalScale] = useState(1.5);
@@ -197,6 +201,20 @@ export default function App() {
           </button>
 
           <button
+            type="button"
+            onClick={toggleFlightMode}
+            className={`py-2 px-3 text-xs font-mono font-bold border transition-all flex items-center gap-1.5 ${
+              isFpv
+                ? 'bg-[#10B981] text-black border-[#10B981] shadow-lg'
+                : 'bg-transparent text-white border-white/20 hover:border-white/50 hover:bg-white/5'
+            }`}
+            title="Toggle First-Person View Drone Flight Mode"
+          >
+            <Radio className="w-3.5 h-3.5 text-[#38BDF8]" />
+            {isFpv ? 'EXIT FPV' : 'DRONE FPV'}
+          </button>
+
+          <button
             onClick={reset}
             className="im-btn-secondary"
           >
@@ -208,8 +226,21 @@ export default function App() {
 
       {/* Main Studio Viewport */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* 3D WebGL Main Viewport */}
-        <div className="flex-1 relative h-full">
+        {isFpv ? (
+          <DroneCanvas
+            heightmapB64={data.heightmap_b64}
+            rgbB64={data.rgb_b64}
+            normalMapB64={data.normal_map_b64}
+            meshStats={data.mesh_stats}
+            verticalScale={verticalScale}
+            waterLevel={waterLevel}
+            dsmRaw={data.dsm_raw}
+            onExitFpv={exitFpv}
+          />
+        ) : (
+          <>
+            {/* 3D WebGL Main Viewport */}
+            <div className="flex-1 relative h-full">
           {renderMode === 'voxel' ? (
             <VoxelTerrain
               dsmRaw={data.dsm_raw}
@@ -351,6 +382,8 @@ export default function App() {
             )}
           </div>
         </aside>
+          </>
+        )}
       </div>
     </div>
   );
