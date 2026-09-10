@@ -87,7 +87,7 @@ export default function DroneFlightController({
     verticalScale,
     waterLevel
   );
-  const initialY = spawnPoint
+  const initialY = (spawnPoint && spawnPoint[1] > 0)
     ? spawnPoint[1]
     : Math.max(16, spawnGroundY + 10.0, maxElevWorld + 8.0);
 

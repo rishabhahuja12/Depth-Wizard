@@ -34,6 +34,8 @@ interface SettingsPanelProps {
   calibration?: Calibration | null;
   isGeoref?: boolean;
   crs?: string;
+  droneSpawnPreset?: 'center' | 'north' | 'south' | 'west' | 'east';
+  onDroneSpawnPresetChange?: (preset: 'center' | 'north' | 'south' | 'west' | 'east') => void;
 }
 
 export default function SettingsPanel({
@@ -53,6 +55,8 @@ export default function SettingsPanel({
   calibration,
   isGeoref = false,
   crs,
+  droneSpawnPreset = 'center',
+  onDroneSpawnPresetChange,
 }: SettingsPanelProps) {
   const minElev = calibration ? calibration.min : (meshStats?.elevation_min ?? 0);
   const maxElev = calibration ? calibration.max : (meshStats?.elevation_max ?? 1);
@@ -277,6 +281,47 @@ export default function SettingsPanel({
               </p>
             </div>
           )}
+        </div>
+
+        {/* FPV Drone Launch Ingress Location (§3 & §6) */}
+        <div className="pt-5 border-t border-white/15 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-neutral-500">
+              FPV Drone Launch Point (§6)
+            </span>
+            <span className="text-[10px] font-mono font-bold text-emerald-400 uppercase">
+              {droneSpawnPreset.toUpperCase()}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-5 gap-1.5 text-xs font-mono">
+            {[
+              { id: 'center' as const, label: 'CENTER' },
+              { id: 'north' as const, label: 'NORTH' },
+              { id: 'south' as const, label: 'SOUTH' },
+              { id: 'west' as const, label: 'WEST' },
+              { id: 'east' as const, label: 'EAST' },
+            ].map(({ id, label }) => {
+              const isSelected = droneSpawnPreset === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => onDroneSpawnPresetChange?.(id)}
+                  className={`py-1.5 px-1 text-center font-bold text-[10px] border transition-all ${
+                    isSelected
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm'
+                      : 'bg-white/[0.02] text-neutral-400 border-white/10 hover:border-white/30 hover:text-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-neutral-400 font-mono leading-relaxed">
+            Sets initial reconnaissance spawn coordinates. Drone automatically clears terrain by +10m on spawn.
+          </p>
         </div>
 
         {/* Elevation & Mesh Telemetry Card */}

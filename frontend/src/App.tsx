@@ -39,8 +39,29 @@ export default function App() {
   const [voxelBands, setVoxelBands] = useState<number>(8);
   const [voxelResolution, setVoxelResolution] = useState<number>(64);
   const [activeTab, setActiveTab] = useState<'surface' | 'flood' | 'profile' | 'inspect'>('surface');
+  const [droneSpawnPreset, setDroneSpawnPreset] = useState<'center' | 'north' | 'south' | 'west' | 'east'>('center');
   const [exporting, setExporting] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
+
+  // Compute 3D spawn coordinates based on selected reconnaissance ingress preset (§3 & §6)
+  const droneSpawnPoint = React.useMemo<[number, number, number] | undefined>(() => {
+    if (!data?.mesh_stats) return undefined;
+    const w = data.mesh_stats.width * 0.1;
+    const d = data.mesh_stats.height * 0.1;
+    switch (droneSpawnPreset) {
+      case 'north':
+        return [0, 0, -d * 0.38];
+      case 'south':
+        return [0, 0, d * 0.38];
+      case 'west':
+        return [-w * 0.38, 0, 0];
+      case 'east':
+        return [w * 0.38, 0, 0];
+      case 'center':
+      default:
+        return [0, 0, 0];
+    }
+  }, [data?.mesh_stats, droneSpawnPreset]);
 
   // Synchronize water level and contour interval with newly loaded terrain elevation
   React.useEffect(() => {
@@ -202,7 +223,12 @@ export default function App() {
 
           <button
             type="button"
-            onClick={toggleFlightMode}
+            onClick={() => {
+              if (document.pointerLockElement) {
+                document.exitPointerLock();
+              }
+              toggleFlightMode();
+            }}
             className={`py-2 px-3 text-xs font-mono font-bold border transition-all flex items-center gap-1.5 ${
               isFpv
                 ? 'bg-[#10B981] text-black border-[#10B981] shadow-lg'
@@ -235,7 +261,13 @@ export default function App() {
             verticalScale={verticalScale}
             waterLevel={waterLevel}
             dsmRaw={data.dsm_raw}
-            onExitFpv={exitFpv}
+            spawnPoint={droneSpawnPoint}
+            onExitFpv={() => {
+              if (document.pointerLockElement) {
+                document.exitPointerLock();
+              }
+              exitFpv();
+            }}
           />
         ) : (
           <>
@@ -347,6 +379,8 @@ export default function App() {
                 calibration={data.calibration}
                 isGeoref={data.is_georef}
                 crs={data.crs}
+                droneSpawnPreset={droneSpawnPreset}
+                onDroneSpawnPresetChange={setDroneSpawnPreset}
               />
             )}
 
