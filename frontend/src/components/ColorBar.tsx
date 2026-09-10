@@ -8,18 +8,25 @@ interface ColorBarProps {
 
 export default function ColorBar({ min, max, unit }: ColorBarProps) {
   return (
-    <div className="neo-box p-2.5 flex flex-col items-center gap-1.5 shadow-[4px_4px_0px_0px_#000]">
-      <div className="text-[9px] font-black uppercase tracking-wider text-[#FFE600]">TURBO DSM</div>
-      <span className="text-[11px] text-[#FF3366] font-mono font-black">{max.toFixed(1)}</span>
-      <div
-        className="w-4 h-32 border-2 border-black"
-        style={{
-          background: 'linear-gradient(to bottom, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff)',
-        }}
-      />
-      <span className="text-[11px] text-[#00FF88] font-mono font-black">{min.toFixed(1)}</span>
-      <span className="text-[9px] font-mono font-bold text-white/60 bg-black px-1 border border-white/20">
-        {unit}
+    <div className="p-3 flex flex-col items-center gap-2 backdrop-blur-md bg-black/90 border border-white/15">
+      <span className="text-[10px] font-mono font-black tracking-widest text-neutral-400 uppercase">
+        TURBO DSM
+      </span>
+      <div className="flex items-center gap-2.5 my-0.5">
+        <div className="flex flex-col justify-between h-28 text-[10px] font-mono text-right py-0.5 select-none">
+          <span className="text-white font-bold">{max.toFixed(1)}</span>
+          <span className="text-neutral-400 font-medium">{((max + min) / 2).toFixed(1)}</span>
+          <span className="text-neutral-500 font-medium">{min.toFixed(1)}</span>
+        </div>
+        <div
+          className="w-2 h-28 border border-white/20 overflow-hidden"
+          style={{
+            background: 'linear-gradient(to bottom, #7a0402, #f36315, #fe9b2d, #a4fc3c, #1bcfd4, #4675ed, #30123b)',
+          }}
+        />
+      </div>
+      <span className="text-[9px] font-mono text-neutral-400 uppercase tracking-widest px-2 py-0.5 border border-white/15">
+        {unit.toUpperCase()}
       </span>
     </div>
   );

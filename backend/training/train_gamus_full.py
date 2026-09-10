@@ -304,6 +304,11 @@ def run_training():
 
                 loss = criterion(pred_norm, target_norm)
 
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"  [WARNING] Batch {batch_idx + 1} produced NaN/Inf loss - skipping gradient step", flush=True)
+                optimizer.zero_grad(set_to_none=True)
+                continue
+
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)

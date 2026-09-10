@@ -1,0 +1,14 @@
+{
+  "landing_page": {
+    "title": "DepthWizard \u2014 Single-View Height Estimation"
+  },
+  "sample_1_geotiff": {
+    "header": "DW\nDEPTHWIZARD\n1131MS\n1024\u00d71024\nGEOREFERENCED\nCONF 0%\nNEW IMAGE"
+  },
+  "sample_2_png": {
+    "header": "DW\nDEPTHWIZARD\n456MS\n1024\u00d71024\nRELATIVE DSM\nCONF 0%\nNEW IMAGE"
+  },
+  "console_errors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+}

@@ -92,12 +92,24 @@ function Terrain({
 
   const isRelative = meshStats.elevation_range <= 2.0;
 
+  // In metric mode: 1 meter elevation corresponds to 0.1 Three.js world units.
+  // In relative mode: elevation span is [0, 1]. To produce rich, visible 3D urban relief on a 51.2-wide plane,
+  // we scale the normalized [0, 1] relative depth to 18.0 world units (comparable to 180m metric relief).
+  const displacementScale = isRelative
+    ? 18.0 * verticalScale
+    : meshStats.elevation_range * verticalScale * 0.1;
+
+  const verticalFactor = isRelative
+    ? 18.0 * verticalScale
+    : verticalScale * 0.1;
+
   // WebGL shader uniforms for dynamic 3D contour lines
   const uniformsRef = useRef({
     uShowContours: { value: showContours ? 1.0 : 0.0 },
     uContourInterval: { value: contourInterval },
     uElevationMin: { value: meshStats.elevation_min },
     uVerticalScale: { value: verticalScale },
+    uDisplacementScale: { value: displacementScale },
     uIsRelative: { value: isRelative ? 1.0 : 0.0 },
   });
 
@@ -106,8 +118,9 @@ function Terrain({
     uniformsRef.current.uContourInterval.value = contourInterval;
     uniformsRef.current.uElevationMin.value = meshStats.elevation_min;
     uniformsRef.current.uVerticalScale.value = verticalScale;
+    uniformsRef.current.uDisplacementScale.value = displacementScale;
     uniformsRef.current.uIsRelative.value = isRelative ? 1.0 : 0.0;
-  }, [showContours, contourInterval, meshStats.elevation_min, verticalScale, isRelative]);
+  }, [showContours, contourInterval, meshStats.elevation_min, verticalScale, displacementScale, isRelative]);
 
   const onBeforeCompile = useMemo(() => {
     return (shader: THREE.WebGLProgramParametersWithUniforms) => {
@@ -115,6 +128,7 @@ function Terrain({
       shader.uniforms.uContourInterval = uniformsRef.current.uContourInterval;
       shader.uniforms.uElevationMin = uniformsRef.current.uElevationMin;
       shader.uniforms.uVerticalScale = uniformsRef.current.uVerticalScale;
+      shader.uniforms.uDisplacementScale = uniformsRef.current.uDisplacementScale;
       shader.uniforms.uIsRelative = uniformsRef.current.uIsRelative;
 
       shader.vertexShader = `
@@ -134,19 +148,20 @@ function Terrain({
         uniform float uContourInterval;
         uniform float uElevationMin;
         uniform float uVerticalScale;
+        uniform float uDisplacementScale;
         uniform float uIsRelative;
         ${shader.fragmentShader}
       `.replace(
         '#include <dithering_fragment>',
         `
         #include <dithering_fragment>
-        if (uShowContours > 0.5 && uContourInterval > 0.01) {
-          float vScale = uIsRelative > 0.5 ? max(16.0 * uVerticalScale, 0.0001) : max(uVerticalScale * 0.1, 0.0001);
+        if (uShowContours > 0.5 && uContourInterval > 0.0001) {
+          float vScale = uIsRelative > 0.5 ? max(uDisplacementScale, 0.0001) : max(uVerticalScale * 0.1, 0.0001);
           float elev = uElevationMin + (vTerrainWorldPos.y / vScale);
-          float cInt = max(uContourInterval, 0.01);
+          float cInt = max(uContourInterval, 0.0001);
           float numIntervals = elev / cInt;
           float dist = abs(numIntervals - floor(numIntervals + 0.5)) * cInt;
-          float dElev = max(fwidth(elev), 0.01);
+          float dElev = max(fwidth(elev), 0.001);
           float line = 1.0 - smoothstep(0.0, dElev * 1.5, dist);
 
           float indexInt = cInt * 5.0;
@@ -164,17 +179,6 @@ function Terrain({
   }, []);
 
   if (!heightTex || !colorTex) return null;
-
-  // In metric mode: 1 meter elevation corresponds to 0.1 Three.js world units.
-  // In relative mode: elevation span is [0, 1]. To produce rich, visible 3D urban relief on a 51.2-wide plane,
-  // we scale the normalized [0, 1] relative depth to 18.0 world units (comparable to 180m metric relief).
-  const displacementScale = isRelative
-    ? 18.0 * verticalScale
-    : meshStats.elevation_range * verticalScale * 0.1;
-
-  const verticalFactor = isRelative
-    ? 18.0 * verticalScale
-    : verticalScale * 0.1;
 
   return (
     <>
@@ -199,13 +203,14 @@ function Terrain({
       {waterLevel > meshStats.elevation_min && (
         <mesh
           rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, (waterLevel - meshStats.elevation_min) * verticalFactor, 0]}
+          position={[0, (waterLevel - meshStats.elevation_min) * verticalFactor + 0.05, 0]}
         >
           <planeGeometry args={[meshStats.width * 0.12, meshStats.height * 0.12]} />
           <meshStandardMaterial
             color="#0077be"
             transparent
-            opacity={0.5}
+            opacity={0.55}
+            depthWrite={false}
             side={THREE.DoubleSide}
             roughness={0.1}
             metalness={0.3}
@@ -221,6 +226,8 @@ function CameraController() {
   const keys = useRef<Set<string>>(new Set());
   const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
   const isLocked = useRef(false);
+  const isDragging = useRef(false);
+  const previousMousePosition = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     camera.position.set(0, 30, 40);
@@ -233,16 +240,47 @@ function CameraController() {
     const onKeyDown = (e: KeyboardEvent) => keys.current.add(e.key.toLowerCase());
     const onKeyUp = (e: KeyboardEvent) => keys.current.delete(e.key.toLowerCase());
 
-    const onMouseMove = (e: MouseEvent) => {
-      if (!isLocked.current) return;
-      euler.current.y -= e.movementX * 0.002;
-      euler.current.x -= e.movementY * 0.002;
-      euler.current.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, euler.current.x));
-      euler.current.z = 0;
-      camera.quaternion.setFromEuler(euler.current);
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 0) {
+        isDragging.current = true;
+        previousMousePosition.current = { x: e.clientX, y: e.clientY };
+      }
     };
 
-    const onClick = () => {
+    const onMouseUp = () => {
+      isDragging.current = false;
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (isLocked.current) {
+        euler.current.y -= e.movementX * 0.002;
+        euler.current.x -= e.movementY * 0.002;
+        euler.current.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, euler.current.x));
+        euler.current.z = 0;
+        camera.quaternion.setFromEuler(euler.current);
+      } else if (isDragging.current) {
+        const deltaX = e.clientX - previousMousePosition.current.x;
+        const deltaY = e.clientY - previousMousePosition.current.y;
+        previousMousePosition.current = { x: e.clientX, y: e.clientY };
+
+        euler.current.y -= deltaX * 0.003;
+        euler.current.x -= deltaY * 0.003;
+        euler.current.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, euler.current.x));
+        euler.current.z = 0;
+        camera.quaternion.setFromEuler(euler.current);
+      }
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const dir = new THREE.Vector3();
+      camera.getWorldDirection(dir);
+      const zoomStep = Math.max(1.0, Math.min(10.0, camera.position.length() * 0.08));
+      camera.position.addScaledVector(dir, (e.deltaY > 0 ? -1 : 1) * zoomStep);
+      if (camera.position.y < 3.0) camera.position.y = 3.0;
+    };
+
+    const onDblClick = () => {
       gl.domElement.requestPointerLock();
     };
 
@@ -257,20 +295,27 @@ function CameraController() {
 
     const onBlur = () => {
       keys.current.clear();
+      isDragging.current = false;
     };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    document.addEventListener('mousemove', onMouseMove);
-    gl.domElement.addEventListener('click', onClick);
+    window.addEventListener('mouseup', onMouseUp);
+    gl.domElement.addEventListener('mousedown', onMouseDown);
+    gl.domElement.addEventListener('mousemove', onMouseMove);
+    gl.domElement.addEventListener('wheel', onWheel, { passive: false });
+    gl.domElement.addEventListener('dblclick', onDblClick);
     document.addEventListener('pointerlockchange', onPointerLockChange);
     window.addEventListener('blur', onBlur);
 
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      document.removeEventListener('mousemove', onMouseMove);
-      gl.domElement.removeEventListener('click', onClick);
+      window.removeEventListener('mouseup', onMouseUp);
+      gl.domElement.removeEventListener('mousedown', onMouseDown);
+      gl.domElement.removeEventListener('mousemove', onMouseMove);
+      gl.domElement.removeEventListener('wheel', onWheel);
+      gl.domElement.removeEventListener('dblclick', onDblClick);
       document.removeEventListener('pointerlockchange', onPointerLockChange);
       window.removeEventListener('blur', onBlur);
     };
@@ -305,8 +350,8 @@ function CameraController() {
       camera.position.y += upDown * speed * dt;
     }
 
-    // Clamp minimum height
-    if (camera.position.y < 2) camera.position.y = 2;
+    // Clamp minimum height to prevent subterranean clipping
+    if (camera.position.y < 3.0) camera.position.y = 3.0;
   });
 
   return null;
@@ -314,13 +359,13 @@ function CameraController() {
 
 export default function TerrainCanvas(props: TerrainCanvasProps) {
   return (
-    <div className="w-full h-full relative">
+    <div className="w-full h-full relative select-none">
       <Canvas
         camera={{ fov: 60, near: 0.1, far: 2000 }}
         gl={{ antialias: true, alpha: false }}
-        style={{ background: '#0a0f1a' }}
+        style={{ background: '#050608' }}
       >
-        <fog attach="fog" args={['#0a0f1a', 50, 200]} />
+        <fog attach="fog" args={['#050608', 60, 250]} />
         <ambientLight intensity={0.4} />
         <directionalLight position={[50, 80, 50]} intensity={1.2} castShadow />
         <directionalLight position={[-30, 40, -30]} intensity={0.3} />
@@ -331,24 +376,29 @@ export default function TerrainCanvas(props: TerrainCanvasProps) {
         <gridHelper args={[200, 50, '#1e293b', '#1e293b']} position={[0, -0.1, 0]} />
       </Canvas>
 
-      {/* Neo-Brutalist HUD overlay */}
-      <div className="absolute bottom-4 left-4 neo-box p-3 shadow-[5px_5px_0px_0px_#000] space-y-1.5 pointer-events-none">
-        <div className="flex items-center gap-1.5 text-[10px] font-black text-[#FFE600] uppercase tracking-wider mb-1">
-          <span className="w-2 h-2 bg-[#FFE600]" /> 6-DoF Flythrough Flight Controls
+      {/* Architectural Flight Telemetry HUD */}
+      <div className="absolute bottom-4 left-4 p-3 pointer-events-none bg-black/90 backdrop-blur-md border border-white/15 text-xs font-mono space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="w-1.5 h-1.5 bg-[#38BDF8]" />
+          <span className="text-[10px] font-mono font-bold text-white tracking-widest uppercase">
+            3D Navigation Controls
+          </span>
         </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="bg-[#FFE600] text-black font-black px-1.5 py-0.5 border border-black text-[10px] font-mono">CLICK</span>
-          <span className="text-white/80 font-mono text-[11px]">Lock mouse look (ESC to release)</span>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="bg-[#00F0FF] text-black font-black px-1.5 py-0.5 border border-black text-[10px] font-mono">WASD</span>
-          <span className="text-white/80 font-mono text-[11px]">Horizontal translation</span>
-          <span className="bg-[#00FF88] text-black font-black px-1.5 py-0.5 border border-black text-[10px] font-mono ml-1">Q / E</span>
-          <span className="text-white/80 font-mono text-[11px]">Ascend / Descend</span>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="bg-[#FF3366] text-white font-black px-1.5 py-0.5 border border-black text-[10px] font-mono">SHIFT</span>
-          <span className="text-white/80 font-mono text-[11px]">3.0× Turbo Sprint</span>
+        <div className="text-[10px] text-neutral-300 space-y-1.5 font-mono">
+          <div className="flex items-center gap-2">
+            <kbd className="px-1.5 py-0.5 border border-white/20 bg-white/5 text-white font-bold text-[9px]">DRAG</kbd>
+            <span className="text-neutral-400">ROTATE VIEW</span>
+            <kbd className="px-1.5 py-0.5 border border-white/20 bg-white/5 text-white font-bold text-[9px] ml-1">SCROLL</kbd>
+            <span className="text-neutral-400">ZOOM</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <kbd className="px-1.5 py-0.5 border border-white/20 bg-white/5 text-white font-bold text-[9px]">WASD</kbd>
+            <span className="text-neutral-400">FLY</span>
+            <kbd className="px-1.5 py-0.5 border border-white/20 bg-white/5 text-white font-bold text-[9px] ml-1">Q / E</kbd>
+            <span className="text-neutral-400">ALTITUDE</span>
+            <kbd className="px-1.5 py-0.5 border border-[#38BDF8]/40 bg-[#38BDF8]/10 text-[#38BDF8] font-bold text-[9px] ml-1">DBL-CLICK</kbd>
+            <span className="text-neutral-400">LOCK MOUSE</span>
+          </div>
         </div>
       </div>
     </div>

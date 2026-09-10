@@ -1,6 +1,20 @@
-import React, { useState } from 'react';
-import { Settings, Mountain, Download, Check } from 'lucide-react';
+import React from 'react';
+import { Mountain, Layers, Compass } from 'lucide-react';
 import ContourOverlay from './ContourOverlay';
+
+interface MeshStats {
+  elevation_min: number;
+  elevation_max: number;
+  original_width: number;
+  original_height: number;
+  pixel_size?: number;
+}
+
+interface Calibration {
+  min: number;
+  max: number;
+  unit: string;
+}
 
 interface SettingsPanelProps {
   verticalScale: number;
@@ -9,61 +23,57 @@ interface SettingsPanelProps {
   onContoursToggle: () => void;
   contourInterval: number;
   onContourIntervalChange: (val: number) => void;
-  requestId: string;
+  meshStats?: MeshStats;
+  calibration?: Calibration | null;
+  isGeoref?: boolean;
+  crs?: string;
 }
 
 export default function SettingsPanel({
-  verticalScale, onVerticalScaleChange,
-  showContours, onContoursToggle,
-  contourInterval, onContourIntervalChange,
-  requestId,
+  verticalScale,
+  onVerticalScaleChange,
+  showContours,
+  onContoursToggle,
+  contourInterval,
+  onContourIntervalChange,
+  meshStats,
+  calibration,
+  isGeoref = false,
+  crs,
 }: SettingsPanelProps) {
-  const [exporting, setExporting] = useState(false);
-  const [downloaded, setDownloaded] = useState(false);
-
-  const handleExport = async () => {
-    try {
-      setExporting(true);
-      const response = await fetch(`/api/export/${requestId}`);
-      if (!response.ok) throw new Error('Export failed');
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `depthwizard_dsm_${requestId}.tif`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setDownloaded(true);
-      setTimeout(() => setDownloaded(false), 3000);
-    } catch (err) {
-      console.error('Export error:', err);
-    } finally {
-      setExporting(false);
-    }
-  };
+  const minElev = calibration ? calibration.min : (meshStats?.elevation_min ?? 0);
+  const maxElev = calibration ? calibration.max : (meshStats?.elevation_max ?? 1);
+  const spanElev = Math.max(0, maxElev - minElev);
+  const unit = calibration ? calibration.unit : 'relative';
+  const gsd = meshStats?.pixel_size ? `${meshStats.pixel_size.toFixed(2)}m` : 'SYNTHETIC';
 
   return (
-    <div className="neo-card">
-      <div className="neo-card-header bg-[#00FF88] text-black">
-        <span className="flex items-center gap-1.5 font-black">
-          <Settings className="w-4 h-4" /> Terrain Controls
-        </span>
-        <span className="font-mono text-[10px] bg-black text-[#00FF88] px-1.5 py-0.5 border border-black">
-          OUTPUT
-        </span>
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="space-y-2 border-b border-white/15 pb-4">
+        <div className="text-[10px] font-mono font-bold tracking-widest text-neutral-500 uppercase">
+          01 / SURFACE CONTROLS
+        </div>
+        <h3 className="text-lg font-black text-white uppercase tracking-tight">
+          Relief & Geometry
+        </h3>
+        <p className="text-xs text-neutral-400 leading-relaxed font-normal">
+          Adjust vertical scale exaggeration, realtime vector contour lines, and inspect geometric telemetry.
+        </p>
       </div>
 
-      <div className="p-3.5 space-y-4">
+      <div className="space-y-7">
         {/* Vertical Exaggeration */}
-        <div className="space-y-1.5">
-          <div className="flex justify-between items-center text-xs font-mono font-bold">
-            <span className="flex items-center gap-1.5 text-white/80 uppercase">
-              <Mountain className="w-3.5 h-3.5 text-[#00FF88]" /> Vertical Exaggeration
+        <div className="space-y-3.5">
+          <div className="flex justify-between items-end text-xs font-mono">
+            <span className="text-neutral-400 uppercase tracking-wider text-[11px]">
+              Vertical Scale
             </span>
-            <span className="bg-[#FFE600] text-black px-1.5 py-0.2 border border-black font-black">
+            <span className="text-white font-black text-lg tracking-tight">
               {verticalScale.toFixed(1)}×
             </span>
           </div>
+
           <input
             type="range"
             min={0.1}
@@ -71,43 +81,89 @@ export default function SettingsPanel({
             step={0.1}
             value={verticalScale}
             onChange={(e) => onVerticalScaleChange(parseFloat(e.target.value))}
-            className="neo-slider"
+            className="im-slider"
           />
-          <div className="flex justify-between text-[9px] font-mono text-white/40">
-            <span>0.1× (Subtle)</span>
-            <span>5.0× (Extreme)</span>
+
+          <div className="flex justify-between text-[10px] text-neutral-500 font-mono">
+            <span>0.1× SUBTLE</span>
+            <span>5.0× STEEP</span>
+          </div>
+
+          {/* Scale Presets - Sharp Minimalist Grid */}
+          <div className="grid grid-cols-4 gap-2 pt-1">
+            {[
+              { label: '0.5×', val: 0.5 },
+              { label: '1.0×', val: 1.0 },
+              { label: '1.8×', val: 1.8 },
+              { label: '3.0×', val: 3.0 },
+            ].map(({ label, val }) => {
+              const isSelected = Math.abs(verticalScale - val) < 0.05;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => onVerticalScaleChange(val)}
+                  className={`py-2 text-xs font-mono font-bold border transition-all ${
+                    isSelected
+                      ? 'bg-white text-black border-white'
+                      : 'bg-transparent text-neutral-400 border-white/15 hover:border-white/40 hover:text-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Contour Lines */}
-        <ContourOverlay
-          active={showContours}
-          onToggle={onContoursToggle}
-          interval={contourInterval}
-          onIntervalChange={onContourIntervalChange}
-        />
+        {/* Contour Lines Section */}
+        <div className="pt-5 border-t border-white/15">
+          <ContourOverlay
+            active={showContours}
+            onToggle={onContoursToggle}
+            interval={contourInterval}
+            onIntervalChange={onContourIntervalChange}
+            isGeoref={isGeoref}
+          />
+        </div>
 
-        {/* Export GeoTIFF Button */}
-        <button
-          onClick={handleExport}
-          disabled={exporting}
-          className="w-full neo-btn bg-[#FFE600] text-black py-2.5 px-4 font-black text-xs uppercase tracking-wider hover:bg-[#ffeb3b] active:translate-x-1 active:translate-y-1"
-        >
-          {exporting ? (
-            <span className="flex items-center gap-2">
-              <div className="w-3 h-3 border-2 border-black border-t-transparent animate-spin" />
-              Generating GeoTIFF...
-            </span>
-          ) : downloaded ? (
-            <span className="flex items-center gap-2 text-black">
-              <Check className="w-4 h-4" /> Downloaded Successfully
-            </span>
-          ) : (
-            <span className="flex items-center gap-2">
-              <Download className="w-4 h-4" /> Export Standard GeoTIFF
-            </span>
-          )}
-        </button>
+        {/* Elevation & Mesh Telemetry Card */}
+        <div className="pt-5 border-t border-white/15 space-y-3">
+          <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-neutral-500">
+            Elevation & Spatial Telemetry
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+            <div className="p-3 bg-white/[0.02] border border-white/10">
+              <span className="text-[10px] text-neutral-400 block uppercase tracking-wider">Base Elevation</span>
+              <span className="text-white font-bold text-sm mt-1 block">{minElev.toFixed(1)} {unit}</span>
+            </div>
+            <div className="p-3 bg-white/[0.02] border border-white/10">
+              <span className="text-[10px] text-neutral-400 block uppercase tracking-wider">Peak Elevation</span>
+              <span className="text-[#38BDF8] font-bold text-sm mt-1 block">{maxElev.toFixed(1)} {unit}</span>
+            </div>
+            <div className="p-3 bg-white/[0.02] border border-white/10">
+              <span className="text-[10px] text-neutral-400 block uppercase tracking-wider">Relief Span</span>
+              <span className="text-white font-bold text-sm mt-1 block">{spanElev.toFixed(1)} {unit}</span>
+            </div>
+            <div className="p-3 bg-white/[0.02] border border-white/10">
+              <span className="text-[10px] text-neutral-400 block uppercase tracking-wider">Pixel GSD</span>
+              <span className="text-[#34D399] font-bold text-sm mt-1 block">{gsd}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Coordinate Reference Box */}
+        <div className="p-3.5 bg-white/[0.02] border border-white/10 text-xs font-mono space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-neutral-400 shrink-0 uppercase tracking-wider text-[10px]">Projection</span>
+            <span className="text-white font-bold text-right truncate text-[11px]">{isGeoref ? `${crs || 'EPSG:32617'} (WGS84 UTM)` : 'RELATIVE SYNTHETIC GRID'}</span>
+          </div>
+          <div className="flex items-center justify-between gap-3 pt-2 border-t border-white/10">
+            <span className="text-neutral-400 shrink-0 uppercase tracking-wider text-[10px]">Datum</span>
+            <span className="text-white font-bold text-right truncate text-[11px]">{isGeoref ? 'ELLIPSOIDAL HEIGHT (M)' : 'NORMALIZED RANGE [0, 1]'}</span>
+          </div>
+        </div>
       </div>
     </div>
   );

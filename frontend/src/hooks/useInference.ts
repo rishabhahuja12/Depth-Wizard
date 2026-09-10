@@ -32,6 +32,7 @@ export interface InferenceResult {
   calibration: CalibrationData;
   dsm_raw: number[][];
   is_georef: boolean;
+  crs?: string;
   confidence_mean?: number;
   inference_time_ms: number;
 }
@@ -42,7 +43,7 @@ export function useInference() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
 
-  const upload = useCallback(async (file: File) => {
+  const upload = useCallback(async (file: File, estimateUncertainty: boolean = false) => {
     setLoading(true);
     setError(null);
     setProgress(10);
@@ -53,7 +54,8 @@ export function useInference() {
 
       setProgress(30);
 
-      const response = await fetch('/api/upload', {
+      const url = estimateUncertainty ? '/api/upload?estimate_uncertainty=true' : '/api/upload';
+      const response = await fetch(url, {
         method: 'POST',
         body: formData,
       });

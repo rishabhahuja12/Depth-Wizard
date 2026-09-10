@@ -18,6 +18,7 @@ class InferenceResponse(BaseModel):
     calibration: dict
     dsm_raw: list  # Full resolution DSM for frontend tools
     is_georef: bool
+    crs: Optional[str] = None
     confidence_mean: Optional[float] = None
     inference_time_ms: float
 

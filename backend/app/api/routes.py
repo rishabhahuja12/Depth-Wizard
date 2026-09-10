@@ -171,6 +171,7 @@ async def upload_image(
         },
         dsm_raw=mesh_data["dsm_raw"],
         is_georef=metadata.is_georef,
+        crs=metadata.crs,
         confidence_mean=conf_mean,
         inference_time_ms=round(inference_time, 1),
     )

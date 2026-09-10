@@ -18,8 +18,12 @@ class DepthEstimator:
         self.device = torch.device(DEVICE if torch.cuda.is_available() else "cpu")
         log.info("Loading Depth Anything V2 ViT-S", device=str(self.device))
 
-        self.processor = AutoImageProcessor.from_pretrained(MODEL_ID)
-        self.model = AutoModelForDepthEstimation.from_pretrained(MODEL_ID)
+        try:
+            self.processor = AutoImageProcessor.from_pretrained(MODEL_ID, local_files_only=True)
+            self.model = AutoModelForDepthEstimation.from_pretrained(MODEL_ID, local_files_only=True)
+        except Exception:
+            self.processor = AutoImageProcessor.from_pretrained(MODEL_ID)
+            self.model = AutoModelForDepthEstimation.from_pretrained(MODEL_ID)
         self.model.to(self.device)
         self.model.eval()
 
@@ -36,8 +40,13 @@ class DepthEstimator:
                          loss=checkpoint.get("loss", "?"))
             else:
                 state_dict = checkpoint
-            self.model.load_state_dict(state_dict, strict=False)
-            log.info("Fine-tuned weights loaded successfully")
+
+            has_nans = any(torch.isnan(v).any() or torch.isinf(v).any() for v in state_dict.values())
+            if has_nans:
+                log.error("Corrupted checkpoint detected with NaNs! Refusing to load.")
+            else:
+                self.model.load_state_dict(state_dict, strict=False)
+                log.info("Fine-tuned weights loaded successfully")
 
         log.info("DepthEstimator ready",
                  params=f"{sum(p.numel() for p in self.model.parameters()) / 1e6:.1f}M")
