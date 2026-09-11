@@ -100,29 +100,42 @@ The weekend run — **offline, low LR, small batch, VRAM-capped, throttled** —
 to a file so it survives a disconnect. `--offline` reads only the prefetched data,
 so you can literally unplug the network:
 ```powershell
-.venv\Scripts\python.exe upgrade\training\train_metric.py --offline `
+.venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume `
   --epochs 50 --warmup 3 `
   --enc-lr 2.5e-6 --head-lr 2.5e-5 `
-  --batch 2 --grad-accum 8 --crop 518 `
+  --batch 2 --grad-accum 8 --crop 512 `
   --max-vram-frac 0.5 --throttle-sleep 0.15 `
-  --workers 4 *> upgrade\outputs\train_stage1.log
+  --workers 4 *>> upgrade\outputs\train_stage1.log
 ```
 What each choice does:
 | Flag | Value | Why |
 |---|---|---|
 | `--offline` | on | read only prefetched local data — **no internet, immune to drops** |
+| `--resume` | on | continue from `metric_last.pth` if the run was interrupted (safe to re-run) |
 | `--enc-lr / --head-lr` | 2.5e-6 / 2.5e-5 | **Half the standard low LRs** — gentle, steady; we have time |
 | `--epochs / --warmup` | 50 / 3 | Low LR needs more epochs; longer warmup = softer start |
 | `--batch / --grad-accum` | 2 / 8 | eff. batch 16 but tiny VRAM footprint |
+| `--crop` | 512 | deterministic 512 tile-cells (4 per 1024 tile), zero augmentation |
 | `--max-vram-frac` | 0.5 | hard cap → process can't exceed ~12 GB |
 | `--throttle-sleep` | 0.15 | idles each step → holds average GPU utilization down |
 
-Output checkpoint: `upgrade\checkpoints\metric_best.pth` (+ its held-out val MAE).
-All tiles are already on disk (step 7), so every epoch reads locally.
+Checkpoints (`upgrade\checkpoints\`): `metric_best.pth` (best val MAE) and
+`metric_last.pth` (full state for resume). **Interrupted?** Just re-run the exact
+same command — `--resume` picks up from the last completed epoch. `*>>` appends to
+the log so resumed runs don't clobber history.
 Rough budget: ~20–30 h for 50 throttled epochs — comfortably a weekend.
 
-> Requires step 7 to have finished. If a manifest is missing it errors immediately
+> Requires step 7. If a manifest is missing it errors immediately
 > ("Offline mode but no manifest ... Run gamus_prefetch first") rather than hanging.
+
+### Optional: LoRA instead of full fine-tune (fallback / for testing Giant)
+Needs `pip install peft`. Frees VRAM, trains faster, slight ceiling cost — use only
+if full-FT stalls or you want to A/B the Giant backbone:
+```powershell
+.venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume --lora `
+  --lora-r 16 --lora-alpha 32 --epochs 50 --crop 512 `
+  --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_lora.log
+```
 
 ---
 
@@ -138,19 +151,54 @@ while ($true) { nvidia-smi --query-gpu=utilization.gpu,memory.used,power.draw --
 
 ## 11. The kill-gate (why we measured first)
 Compare `train_stage1.log`'s best **val MAE** against the P0 baseline MAE:
-- **Beats baseline** → proceed to Stage 2 (add the Sobel edge loss), then Stage 3.
+- **Beats baseline** → proceed to Stage 2 (§12).
 - **Doesn't beat it** → debug data/scaling BEFORE stacking more losses. Don't pile
   loss terms on a base that isn't winning.
 
-Bring both numbers back and we'll decide Stage 2 together.
+Bring both numbers back and we'll decide together.
 
 ---
 
-## Sanity: unit tests (CPU, no GPU)
+## 12. Later stages — ONLY after the previous one wins (all built & tested)
+
+Everything below is coded and unit-tested; run it in this **gated order** — each
+step must beat the previous on val MAE (or its own metric) before the next.
+
+**Stage 2 — add the edge (Sobel) loss** (sharper building/ridge walls):
 ```powershell
-.venv\Scripts\python.exe upgrade\evaluation\tests\test_metrics.py
-.venv\Scripts\python.exe upgrade\training\tests\test_metric_losses.py
-.venv\Scripts\python.exe upgrade\training\tests\test_metric_dataset.py
-.venv\Scripts\python.exe upgrade\training\tests\test_train_helpers.py
-.venv\Scripts\python.exe upgrade\training\tests\test_prefetch.py
+.venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume `
+  --w-silog 1.0 --w-l1 1.0 --w-grad 0.5 `
+  --epochs 60 --crop 512 --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_stage2.log
 ```
+**Stage 3 — add long-tail (tall-structure) reweighting** (only if Stage 2 helped):
+```powershell
+.venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume `
+  --w-silog 1.0 --w-l1 1.0 --w-grad 0.5 --w-lt 0.5 `
+  --epochs 60 --crop 512 --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_stage3.log
+```
+
+**Dataset blend (Open-Canopy + GBH)** — only after GAMUS-only wins. Download the
+datasets, point `GeoTiffHeightSource` at them, and mix through `MixedMetricDataset`
+(see `upgrade\training\multi_dataset.py`). Harmonizes GSD→common grid, forces
+meters, balances batches. (A dedicated blend runner is wired when you have the
+tiles; the framework + adapter are tested.)
+
+**Inference-side (P1b / P2 / P4)** — used when serving the trained model, not during
+training. All tested, in `upgrade\inference\`:
+- `dem_base.py` — compose absolute DSM = real DEM base + nDSM (flood-critical).
+- `tiling.py` — seamless tiled hi-res inference (Export path; Live stays 1-pass).
+- `off_nadir.py` — obliqueness flag ("⚠ oblique — reduced accuracy").
+
+These integrate into the live app as a **separate, deliberate step** (logged in
+`upgrade\INTEGRATIONS.md`) once a metric checkpoint has passed the gate.
+
+---
+
+## Sanity: unit tests (CPU, no GPU) — all should pass before trusting a run
+```powershell
+Get-ChildItem -Recurse upgrade -Filter test_*.py | ForEach-Object {
+  .venv\Scripts\python.exe $_.FullName
+}
+```
+The end-to-end `test_train_integration.py` actually runs the training loop + a
+checkpoint resume on CPU — the closest proof the workstation path is sound.

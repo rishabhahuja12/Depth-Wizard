@@ -56,6 +56,30 @@ def build_param_groups(model, enc_lr: float, head_lr: float) -> list[dict]:
 
 # --------------------------- model + prediction ---------------------------
 
+def save_ckpt(path, model, optim, sched, epoch: int, best_mae: float) -> None:
+    """Full training state so an interrupted weekend run can resume exactly."""
+    import torch
+    torch.save({
+        "epoch": epoch,               # number of epochs COMPLETED
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optim.state_dict(),
+        "scheduler_state_dict": sched.state_dict(),
+        "best_mae": best_mae,
+    }, path)
+
+
+def load_ckpt(path, model, optim, sched):
+    """Restore state saved by save_ckpt. Returns (start_epoch, best_mae)."""
+    import torch
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    model.load_state_dict(ckpt["model_state_dict"], strict=False)
+    if optim is not None and ckpt.get("optimizer_state_dict"):
+        optim.load_state_dict(ckpt["optimizer_state_dict"])
+    if sched is not None and ckpt.get("scheduler_state_dict"):
+        sched.load_state_dict(ckpt["scheduler_state_dict"])
+    return int(ckpt.get("epoch", 0)), float(ckpt.get("best_mae", float("inf")))
+
+
 def load_model(model_id: str, device):
     from transformers import AutoModelForDepthEstimation
     model = AutoModelForDepthEstimation.from_pretrained(model_id)
@@ -147,16 +171,25 @@ def train(args) -> int:
     from torch.utils.data import DataLoader
     import metric_dataset as md
     dataset = md.MetricGAMUSDataset(split="train", crop=args.crop, augment=args.augment,
-                                    offline=args.offline, cache_dir=Path(args.cache_dir))
+                                    offline=args.offline, cache_dir=Path(args.cache_dir),
+                                    tile_size=args.tile_size)
     loader = DataLoader(dataset, batch_size=args.batch, shuffle=True,
                         num_workers=args.workers, pin_memory=True, drop_last=True)
     print(f"Train tiles: {len(dataset)} | batch {args.batch} x grad-accum {args.grad_accum}"
           f"{' | OFFLINE' if args.offline else ''}")
 
-    CKPT_DIR.mkdir(parents=True, exist_ok=True)
+    ckpt_dir = Path(getattr(args, "ckpt_dir", None) or CKPT_DIR)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    last_path = ckpt_dir / "metric_last.pth"
     best_mae = float("inf")
+    start_epoch = 0
 
-    for epoch in range(args.epochs):
+    # Resume an interrupted run from the last full-state checkpoint.
+    if args.resume and last_path.exists():
+        start_epoch, best_mae = load_ckpt(last_path, model, optim, sched)
+        print(f"Resumed from {last_path.name}: {start_epoch} epochs done, best MAE {best_mae:.3f}")
+
+    for epoch in range(start_epoch, args.epochs):
         t0 = time.time()
         running = 0.0
         optim.zero_grad(set_to_none=True)
@@ -189,8 +222,11 @@ def train(args) -> int:
             best_mae = val_mae
             torch.save({"epoch": epoch + 1, "model_state_dict": model.state_dict(),
                         "val_mae_m": val_mae, "model_id": args.model, "metric": True},
-                       CKPT_DIR / "metric_best.pth")
+                       ckpt_dir / "metric_best.pth")
             print(f"  -> saved metric_best.pth (val MAE {val_mae:.3f} m)")
+
+        # Always save full state so the run can resume after any interruption.
+        save_ckpt(last_path, model, optim, sched, epoch + 1, best_mae)
 
     print(f"Done. Best held-out MAE: {best_mae:.3f} m")
     return 0
@@ -252,10 +288,16 @@ def main() -> int:
                     help="hard cap on fraction of GPU memory this process may use (0 = uncapped)")
     ap.add_argument("--throttle-sleep", type=float, default=0.0, dest="throttle_sleep",
                     help="seconds to idle per step; raise to lower average GPU utilization")
+    ap.add_argument("--resume", action="store_true",
+                    help="resume from upgrade/checkpoints/metric_last.pth if present")
+    ap.add_argument("--tile-size", type=int, default=1024, dest="tile_size",
+                    help="source tile size for deterministic cell grid (GAMUS = 1024)")
     ap.add_argument("--offline", action="store_true",
                     help="read only local prefetched data (run gamus_prefetch first); no network")
     ap.add_argument("--cache-dir", default=str(DATA_CACHE), dest="cache_dir",
                     help="local GAMUS cache / manifest dir (matches gamus_prefetch)")
+    ap.add_argument("--ckpt-dir", default=str(CKPT_DIR), dest="ckpt_dir",
+                    help="where to write metric_best.pth / metric_last.pth")
     ap.add_argument("--smoke", action="store_true", help="CPU wiring check, no GAMUS/GPU")
     ap.add_argument("--smoke-size", type=int, default=126, dest="smoke_size")
     args = ap.parse_args()

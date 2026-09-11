@@ -140,12 +140,14 @@ class MetricGAMUSDataset:
 
     def __init__(self, split: str = "train", crop: int = 512, augment: bool = False,
                  cache_dir: Path | None = None, seed: int = 42, repo: str = "earthflow/GAMUS",
-                 offline: bool = False, manifest_path: Path | None = None, retries: int = 4):
+                 offline: bool = False, manifest_path: Path | None = None, retries: int = 4,
+                 tile_size: int | None = None):
         from torch.utils.data import Dataset  # noqa: F401  (marker that torch is available)
 
         self.split = split
         self.crop = crop
         self.augment = augment
+        self.tile_size = tile_size or self.TILE_SIZE
         self.repo = repo
         self.offline = offline
         self.retries = retries
@@ -168,7 +170,7 @@ class MetricGAMUSDataset:
             n_tiles = len(self.rgb_files)
 
         # Flatten (tile, cell) into a deterministic sample index.
-        cells = tile_grid(self.TILE_SIZE, self.TILE_SIZE, crop)
+        cells = tile_grid(self.tile_size, self.tile_size, crop)
         self.index = [(ti, r0, c0) for ti in range(n_tiles) for (r0, c0) in cells]
 
     def __len__(self) -> int:
