@@ -1,0 +1,15 @@
+# Heavy / regenerable artifacts local to the upgrade sandbox.
+# Code, notes, and small reports are tracked; bulk outputs are not.
+
+outputs/
+checkpoints/
+data/
+*.pth
+*.ckpt
+*.npy
+*.npz
+*.h5
+*.hdf5
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
