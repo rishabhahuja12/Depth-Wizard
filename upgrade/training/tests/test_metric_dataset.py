@@ -71,6 +71,24 @@ def test_apply_augment_identity_when_no_ops():
     assert np.array_equal(rgb_a, rgb) and np.array_equal(depth_a, depth)
 
 
+def test_tile_grid_partitions_1024_into_quadrants():
+    # Zero-augmentation training uses deterministic non-overlapping cells, not a
+    # random crop. A 1024 tile at crop 512 -> exactly the 4 quadrants, in order.
+    grid = md.tile_grid(1024, 1024, 512)
+    assert grid == [(0, 0), (0, 512), (512, 0), (512, 512)]
+
+
+def test_tile_grid_single_cell_when_crop_exceeds_tile():
+    assert md.tile_grid(300, 300, 512) == [(0, 0)]
+
+
+def test_tile_grid_drops_partial_remainder():
+    # 1024 at crop 400 -> only the two full cells per axis (0 and 400); the 224
+    # remainder is dropped so every cell is exactly crop x crop (deterministic).
+    grid = md.tile_grid(1024, 1024, 400)
+    assert grid == [(0, 0), (0, 400), (400, 0), (400, 400)]
+
+
 def test_offline_tiles_reads_manifest_without_network():
     # Build a manifest on disk (as gamus_prefetch would) and confirm the dataset
     # can enumerate tiles from it with NO HuggingFace calls.

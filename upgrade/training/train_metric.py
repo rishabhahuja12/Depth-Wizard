@@ -137,7 +137,7 @@ def train(args) -> int:
 
     from torch.utils.data import DataLoader
     import metric_dataset as md
-    dataset = md.MetricGAMUSDataset(split="train", crop=args.crop, augment=True,
+    dataset = md.MetricGAMUSDataset(split="train", crop=args.crop, augment=args.augment,
                                     offline=args.offline, cache_dir=Path(args.cache_dir))
     loader = DataLoader(dataset, batch_size=args.batch, shuffle=True,
                         num_workers=args.workers, pin_memory=True, drop_last=True)
@@ -218,7 +218,9 @@ def main() -> int:
     ap.add_argument("--epochs", type=int, default=35)
     ap.add_argument("--batch", type=int, default=2)
     ap.add_argument("--grad-accum", type=int, default=8, dest="grad_accum")  # eff. batch 16
-    ap.add_argument("--crop", type=int, default=518)
+    ap.add_argument("--crop", type=int, default=512, help="deterministic tile-cell size")
+    ap.add_argument("--augment", action="store_true",
+                    help="opt-in flip/rotate aug (default OFF — zero-augmentation, raw tiles)")
     ap.add_argument("--warmup", type=int, default=2)
     ap.add_argument("--enc-lr", type=float, default=5e-6, dest="enc_lr")
     ap.add_argument("--head-lr", type=float, default=5e-5, dest="head_lr")

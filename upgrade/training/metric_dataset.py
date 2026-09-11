@@ -31,8 +31,23 @@ def prepare_target(agl_patch: np.ndarray) -> np.ndarray:
     return np.maximum(out, 0.0)
 
 
+def tile_grid(h: int, w: int, crop: int) -> list[tuple[int, int]]:
+    """Deterministic non-overlapping cell origins (r0, c0) covering the tile.
+
+    Zero-augmentation training uses this instead of a random crop: every cell is
+    exactly crop x crop, in a fixed row-major order, so there is no randomness.
+    A partial remainder that can't fill a full cell is dropped. If the crop is
+    larger than the tile, a single (0, 0) cell is returned (the caller resizes)."""
+    if crop >= h or crop >= w:
+        return [(0, 0)]
+    rows = h // crop
+    cols = w // crop
+    return [(r * crop, c * crop) for r in range(rows) for c in range(cols)]
+
+
 def random_crop_box(h: int, w: int, crop: int, rng: np.random.Generator) -> tuple[int, int, int, int]:
-    """Random crop box (r1, r2, c1, c2). If crop exceeds the image, use the full image."""
+    """Random crop box (r1, r2, c1, c2). Retained for reference/opt-in only — the
+    default pipeline uses deterministic tile_grid (zero augmentation)."""
     if crop >= h or crop >= w:
         return 0, h, 0, w
     r1 = int(rng.integers(0, h - crop + 1))
@@ -67,12 +82,21 @@ def offline_tiles(manifest_path) -> list[dict]:
     return json.loads(Path(manifest_path).read_text(encoding="utf-8"))["tiles"]
 
 
-def _read_h5_pair(rgb_local: str, agl_local: str):
+def _read_h5_pair(rgb_local: str, agl_local: str, box: tuple[int, int, int] | None = None):
+    """Read an RGB+AGL pair. If box=(r0, c0, crop), slice that cell directly from
+    the h5 (no full-tile load); else read the whole tile."""
     import h5py
-    with h5py.File(rgb_local, "r") as f:
-        rgb_full = np.array(f["image"])
-    with h5py.File(agl_local, "r") as f:
-        agl_full = np.array(f["image"]).astype(np.float32)
+    if box is not None:
+        r0, c0, crop = box
+        with h5py.File(rgb_local, "r") as f:
+            rgb_full = np.array(f["image"][r0:r0 + crop, c0:c0 + crop])
+        with h5py.File(agl_local, "r") as f:
+            agl_full = np.array(f["image"][r0:r0 + crop, c0:c0 + crop]).astype(np.float32)
+    else:
+        with h5py.File(rgb_local, "r") as f:
+            rgb_full = np.array(f["image"])
+        with h5py.File(agl_local, "r") as f:
+            agl_full = np.array(f["image"]).astype(np.float32)
     if rgb_full.ndim == 2:
         rgb_full = np.repeat(rgb_full[..., None], 3, axis=-1)
     return rgb_full[..., :3], agl_full
@@ -104,10 +128,17 @@ class MetricGAMUSDataset:
       * offline=False -> lazily lists + downloads tiles from HuggingFace, with
         retries; caches to disk as it goes.
 
+    Sampling is ZERO-AUGMENTATION by default: each 1024 tile is partitioned into
+    deterministic non-overlapping `crop`-sized cells (tile_grid). No random crop,
+    no flips/rotations, no photometric jitter — raw tiles only. `augment=True`
+    re-enables the (label-safe) flip/rotate path for opt-in experiments.
+
     Heavy imports are deferred so the pure helpers above stay unit-testable.
     """
 
-    def __init__(self, split: str = "train", crop: int = 518, augment: bool = True,
+    TILE_SIZE = 1024  # GAMUS tiles are uniformly 1024x1024
+
+    def __init__(self, split: str = "train", crop: int = 512, augment: bool = False,
                  cache_dir: Path | None = None, seed: int = 42, repo: str = "earthflow/GAMUS",
                  offline: bool = False, manifest_path: Path | None = None, retries: int = 4):
         from torch.utils.data import Dataset  # noqa: F401  (marker that torch is available)
@@ -128,49 +159,61 @@ class MetricGAMUSDataset:
                 raise FileNotFoundError(
                     f"Offline mode but no manifest at {mp}. Run gamus_prefetch first.")
             self.tiles = offline_tiles(mp)
+            n_tiles = len(self.tiles)
         else:
             from huggingface_hub import list_repo_files
             all_files = list_repo_files(repo, repo_type="dataset")
             prefix = f"images/{split}/"
             self.rgb_files = sorted(f for f in all_files if f.startswith(prefix) and f.endswith("_RGB.h5"))
+            n_tiles = len(self.rgb_files)
+
+        # Flatten (tile, cell) into a deterministic sample index.
+        cells = tile_grid(self.TILE_SIZE, self.TILE_SIZE, crop)
+        self.index = [(ti, r0, c0) for ti in range(n_tiles) for (r0, c0) in cells]
 
     def __len__(self) -> int:
-        return len(self.tiles) if self.offline else len(self.rgb_files)
+        return len(self.index)
 
     def _agl_for(self, rgb_rel: str) -> str:
         return rgb_rel.replace("images/", "heights/").replace("_RGB.h5", "_AGL.h5")
 
-    def _load_full(self, idx: int):
+    def _read_cell(self, tile_i: int, box):
         if self.offline:
-            t = self.tiles[idx]
-            return _read_h5_pair(t["rgb_local"], t["agl_local"])
-        # online: download-with-retry, then read
+            t = self.tiles[tile_i]
+            return _read_h5_pair(t["rgb_local"], t["agl_local"], box=box)
         import time
         from huggingface_hub import hf_hub_download
-        rgb_rel = self.rgb_files[idx]
+        rgb_rel = self.rgb_files[tile_i]
         agl_rel = self._agl_for(rgb_rel)
         last = None
         for attempt in range(self.retries):
             try:
                 rgb_p = hf_hub_download(self.repo, rgb_rel, repo_type="dataset", local_dir=self.cache_dir)
                 agl_p = hf_hub_download(self.repo, agl_rel, repo_type="dataset", local_dir=self.cache_dir)
-                return _read_h5_pair(rgb_p, agl_p)
+                return _read_h5_pair(rgb_p, agl_p, box=box)
             except Exception as e:  # noqa: BLE001
                 last = e
                 time.sleep(2.0 * (attempt + 1))
-        raise RuntimeError(f"failed to load tile {idx} after {self.retries} tries: {last}")
+        raise RuntimeError(f"failed to load tile {tile_i} after {self.retries} tries: {last}")
+
+    def _conform(self, rgb: np.ndarray, depth: np.ndarray):
+        """Guarantee crop x crop (safety net for any tile not exactly TILE_SIZE)."""
+        if rgb.shape[0] == self.crop and rgb.shape[1] == self.crop:
+            return rgb, depth
+        from PIL import Image
+        rgb = np.array(Image.fromarray(rgb).resize((self.crop, self.crop), Image.BILINEAR))
+        depth = np.array(Image.fromarray(depth, mode="F").resize((self.crop, self.crop), Image.BILINEAR))
+        return rgb, depth
 
     def __getitem__(self, idx: int):
         import torch
 
-        rgb_full, agl_full = self._load_full(idx)
+        tile_i, r0, c0 = self.index[idx]
+        rgb, agl = self._read_cell(tile_i, box=(r0, c0, self.crop))
+        rgb, agl = self._conform(rgb, agl)
+        depth = prepare_target(agl)
 
-        h, w = agl_full.shape[:2]
-        r1, r2, c1, c2 = random_crop_box(h, w, self.crop, self.rng)
-        rgb = rgb_full[r1:r2, c1:c2]
-        depth = prepare_target(agl_full[r1:r2, c1:c2])
-
-        if self.augment:
+        if self.augment:  # opt-in only; default pipeline is zero-augmentation
             rgb, depth = apply_augment(
                 rgb, depth,
                 hflip=bool(self.rng.integers(0, 2)),
