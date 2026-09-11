@@ -173,9 +173,34 @@ def train(args) -> int:
     dataset = md.MetricGAMUSDataset(split="train", crop=args.crop, augment=args.augment,
                                     offline=args.offline, cache_dir=Path(args.cache_dir),
                                     tile_size=args.tile_size)
+    # Optional dataset blend: GAMUS (native tiling) + harmonized aux sources
+    # (Open-Canopy / GBH) mixed in at a controlled fraction. Only after GAMUS-only
+    # beats the baseline (research §2.8 sequencing).
+    if args.blend:
+        import aux_datasets
+        from torch.utils.data import ConcatDataset
+        aux_sources = aux_datasets.build_aux_sources(oc_root=args.oc_root, gbh_root=args.gbh_root)
+        if aux_sources:
+            gamus_len = len(dataset)
+            aux_total = max(1, round(args.aux_fraction * gamus_len))
+            weights = {s.name: 1.0 for s in aux_sources}
+            aux_mix = md.MixedMetricDataset(aux_sources, weights, target_gsd=args.aux_gsd,
+                                            crop=args.crop, total_per_epoch=aux_total) \
+                if hasattr(md, "MixedMetricDataset") else None
+            if aux_mix is None:
+                import multi_dataset
+                aux_mix = multi_dataset.MixedMetricDataset(aux_sources, weights,
+                                                           target_gsd=args.aux_gsd, crop=args.crop,
+                                                           total_per_epoch=aux_total)
+            dataset = ConcatDataset([dataset, aux_mix])
+            print(f"Blend: GAMUS {gamus_len} + aux {len(aux_mix)} "
+                  f"({[s.name for s in aux_sources]}) = {len(dataset)}")
+        else:
+            print("Blend requested but no aux sources found — training on GAMUS only.")
+
     loader = DataLoader(dataset, batch_size=args.batch, shuffle=True,
                         num_workers=args.workers, pin_memory=True, drop_last=True)
-    print(f"Train tiles: {len(dataset)} | batch {args.batch} x grad-accum {args.grad_accum}"
+    print(f"Train samples: {len(dataset)} | batch {args.batch} x grad-accum {args.grad_accum}"
           f"{' | OFFLINE' if args.offline else ''}")
 
     ckpt_dir = Path(getattr(args, "ckpt_dir", None) or CKPT_DIR)
@@ -292,6 +317,14 @@ def main() -> int:
                     help="resume from upgrade/checkpoints/metric_last.pth if present")
     ap.add_argument("--tile-size", type=int, default=1024, dest="tile_size",
                     help="source tile size for deterministic cell grid (GAMUS = 1024)")
+    # Dataset blend (Open-Canopy / GBH) — only after GAMUS-only wins.
+    ap.add_argument("--blend", action="store_true", help="mix Open-Canopy/GBH into GAMUS")
+    ap.add_argument("--oc-root", default=None, dest="oc_root", help="Open-Canopy download root")
+    ap.add_argument("--gbh-root", default=None, dest="gbh_root", help="GBH download root")
+    ap.add_argument("--aux-fraction", type=float, default=0.3, dest="aux_fraction",
+                    help="aux samples as a fraction of GAMUS length")
+    ap.add_argument("--aux-gsd", type=float, default=0.5, dest="aux_gsd",
+                    help="common GSD (m) to harmonize aux sources to")
     ap.add_argument("--offline", action="store_true",
                     help="read only local prefetched data (run gamus_prefetch first); no network")
     ap.add_argument("--cache-dir", default=str(DATA_CACHE), dest="cache_dir",

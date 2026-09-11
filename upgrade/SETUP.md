@@ -177,11 +177,32 @@ step must beat the previous on val MAE (or its own metric) before the next.
   --epochs 60 --crop 512 --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_stage3.log
 ```
 
-**Dataset blend (Open-Canopy + GBH)** — only after GAMUS-only wins. Download the
-datasets, point `GeoTiffHeightSource` at them, and mix through `MixedMetricDataset`
-(see `upgrade\training\multi_dataset.py`). Harmonizes GSD→common grid, forces
-meters, balances batches. (A dedicated blend runner is wired when you have the
-tiles; the framework + adapter are tested.)
+**Dataset blend (Open-Canopy + GBH)** — only after GAMUS-only wins. Now runnable
+via `--blend`.
+
+1. Get the data (large — grab slices):
+   - **Open-Canopy** (HF, GeoTIFF, 1.5 m): resumable slice download —
+     ```powershell
+     .venv\Scripts\python.exe -c "import sys; sys.path.insert(0,'upgrade/training'); import aux_datasets as a; a.prefetch_open_canopy('upgrade/data/open_canopy', allow_patterns=None)"
+     ```
+     (Set `allow_patterns` to grab only a slice — the full set is ~360 GB.)
+   - **GBH** (mediaTUM, 256² patches, 3 m): manual download + **confirm the data
+     license**; unpack RGB + nDSM GeoTIFFs into two folders.
+2. **Confirm the real folder names** and pass them as subdirs (defaults may differ
+   from the actual download): the sources take `rgb_subdir` / `height_subdir`.
+3. Train blended (after Stage 1+ on GAMUS):
+   ```powershell
+   .venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume --blend `
+     --oc-root upgrade\data\open_canopy --gbh-root upgrade\data\gbh `
+     --aux-fraction 0.3 --aux-gsd 0.5 --crop 512 `
+     --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_blend.log
+   ```
+   GAMUS keeps native tiling; aux is harmonized (GSD→common grid, meters) and mixed
+   at `--aux-fraction` of GAMUS length, balanced across sources.
+
+> Honest caveat: the aux source readers are validated against real GeoTIFFs (tests),
+> but the exact Open-Canopy/GBH **folder layout must be confirmed** against your
+> download, and GBH's **data license verified**, before a real blend run.
 
 **Inference-side (P1b / P2 / P4)** — used when serving the trained model, not during
 training. All tested, in `upgrade\inference\`:

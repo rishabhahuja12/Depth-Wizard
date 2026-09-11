@@ -50,14 +50,32 @@ def _build_cache(cache: Path):
     pf.save_manifest(cache / "manifest_val.json", pf.build_manifest(val_rels, cache))
 
 
-def _args(cache: Path, ckpt: Path, epochs: int, resume: bool):
+def _args(cache: Path, ckpt: Path, epochs: int, resume: bool, oc_root=None):
     return Namespace(
         model=SMALL, epochs=epochs, batch=1, grad_accum=1, crop=128, tile_size=TILE,
         warmup=1, enc_lr=5e-6, head_lr=5e-5, w_silog=1.0, w_l1=1.0, w_grad=0.0, w_lt=0.0,
         workers=0, val_tiles=1, max_vram_frac=0.0, throttle_sleep=0.0,
         augment=False, lora=False, dora=False, offline=True,
         cache_dir=str(cache), ckpt_dir=str(ckpt), resume=resume,
+        blend=bool(oc_root), oc_root=oc_root, gbh_root=None,
+        aux_fraction=0.5, aux_gsd=0.5,
     )
+
+
+def _write_fake_open_canopy(root: Path, n=2, size=48, h_val=15.0):
+    """A fake Open-Canopy layout: images/*.tif (RGB) + canopy_height/*.tif (meters)."""
+    import rasterio
+    from rasterio.transform import from_origin
+    for i in range(n):
+        rgb = (np.ones((3, size, size)) * 120).astype(np.uint8)
+        h = (np.ones((size, size)) * h_val).astype(np.float32)
+        for sub, arr, count in (("images", rgb, 3), ("canopy_height", h[None], 1)):
+            p = root / sub / f"oc_{i}.tif"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with rasterio.open(p, "w", driver="GTiff", height=size, width=size, count=count,
+                               dtype=arr.dtype, transform=from_origin(0, 0, 1, 1)) as ds:
+                for b in range(count):
+                    ds.write(arr[b], b + 1)
 
 
 def test_train_runs_and_writes_checkpoints_on_cpu():
@@ -83,6 +101,16 @@ def test_resume_continues_from_checkpoint():
         tm.train(_args(cache, ckpt, epochs=2, resume=True))
         done2 = torch.load(ckpt / "metric_last.pth", map_location="cpu", weights_only=False)["epoch"]
         assert done2 == 2, f"resume didn't advance: {done2}"
+
+
+def test_blend_runs_gamus_plus_open_canopy_on_cpu():
+    with tempfile.TemporaryDirectory() as d:
+        cache, ckpt, oc = Path(d) / "cache", Path(d) / "ckpt", Path(d) / "oc"
+        _build_cache(cache)
+        _write_fake_open_canopy(oc, n=2, h_val=15.0)
+        rc = tm.train(_args(cache, ckpt, epochs=1, resume=False, oc_root=str(oc)))
+        assert rc == 0, "blended train() returned nonzero"
+        assert (ckpt / "metric_best.pth").exists(), "no checkpoint from blended run"
 
 
 def _run_all():
