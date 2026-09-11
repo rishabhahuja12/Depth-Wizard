@@ -125,6 +125,11 @@ def train(args) -> int:
         print(f"Throttle: sleeping {args.throttle_sleep:.2f}s per step to hold GPU utilization down")
 
     model = load_model(args.model, device)
+    if args.lora:
+        import adapters
+        model = adapters.wrap_lora(model, r=args.lora_r, alpha=args.lora_alpha,
+                                   dropout=args.lora_dropout, use_dora=args.dora)
+        model.to(device)
     model.train()
 
     criterion = ml.MetricLoss(w_silog=args.w_silog, w_l1=args.w_l1).to(device)
@@ -221,6 +226,12 @@ def main() -> int:
     ap.add_argument("--crop", type=int, default=512, help="deterministic tile-cell size")
     ap.add_argument("--augment", action="store_true",
                     help="opt-in flip/rotate aug (default OFF — zero-augmentation, raw tiles)")
+    # Adapters (fallback / Giant-enabler; full FT is the primary path).
+    ap.add_argument("--lora", action="store_true", help="fine-tune via LoRA adapters instead of full FT")
+    ap.add_argument("--dora", action="store_true", help="use DoRA variant (implies LoRA)")
+    ap.add_argument("--lora-r", type=int, default=16, dest="lora_r")
+    ap.add_argument("--lora-alpha", type=int, default=32, dest="lora_alpha")
+    ap.add_argument("--lora-dropout", type=float, default=0.05, dest="lora_dropout")
     ap.add_argument("--warmup", type=int, default=2)
     ap.add_argument("--enc-lr", type=float, default=5e-6, dest="enc_lr")
     ap.add_argument("--head-lr", type=float, default=5e-5, dest="head_lr")
@@ -240,6 +251,8 @@ def main() -> int:
     ap.add_argument("--smoke", action="store_true", help="CPU wiring check, no GAMUS/GPU")
     ap.add_argument("--smoke-size", type=int, default=126, dest="smoke_size")
     args = ap.parse_args()
+    if args.dora:
+        args.lora = True  # DoRA is a LoRA variant
 
     if args.offline:
         # Force HuggingFace fully offline BEFORE transformers/hf_hub are used, so a
