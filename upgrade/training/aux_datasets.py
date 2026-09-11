@@ -39,8 +39,14 @@ def open_canopy_source(root, rgb_subdir: str = "images", height_subdir: str = "c
 
 def gbh_source(root, rgb_subdir: str = "rgb", height_subdir: str = "ndsm",
                rgb_glob: str = "*.tif") -> GeoTiffHeightSource:
-    """GBH as a height source (nDSM is meters-above-ground). Adjust subdirs to the
-    real mediaTUM layout; confirm the data license before use."""
+    """GBH as a height source (nDSM is meters-above-ground). OPTIONAL / license-gated.
+
+    Data (GBA.Height) is on mediaTUM (NOT HuggingFace); the code repo
+    (github.com/zhu-xlab/GlobalBuildingAtlas) is code only. License is CC BY-NC
+    (non-commercial) for the polygons/LoD1 — CONFIRM the Height license on mediaTUM
+    before any use, especially for a government/competition deliverable. Prefer
+    Open-Canopy (HF, scripted, open) as the primary aux slice; add GBH only if its
+    license clears. Adjust subdirs to the real mediaTUM layout."""
     root = Path(root)
     return GeoTiffHeightSource(name="gbh", gsd=GBH_GSD,
                                rgb_dir=root / rgb_subdir, height_dir=root / height_subdir,
@@ -85,6 +91,9 @@ def prefetch_open_canopy(dst, allow_patterns=None, retries: int = 4) -> None:
 
 def gbh_download_note() -> str:
     """GBH isn't a simple HF pull — it's on mediaTUM. Return the manual steps."""
-    return ("GBH: download patches from mediaTUM (doi.org/10.14459/2025mp1782307), "
-            "confirm the data license, unpack RGB + nDSM GeoTIFFs into two folders, "
-            "then point gbh_source(root, rgb_subdir=..., height_subdir=...) at them.")
+    return ("GBH (OPTIONAL, license-gated): the code is at "
+            "github.com/zhu-xlab/GlobalBuildingAtlas; the DATA (GBA.Height) is on "
+            "mediaTUM (mediatum.ub.tum.de/1782307 = doi.org/10.14459/2025mp1782307), "
+            "NOT HuggingFace. License is CC BY-NC (non-commercial) — CONFIRM the "
+            "Height license before use. Then unpack RGB + nDSM GeoTIFFs into two "
+            "folders and point gbh_source(root, rgb_subdir=..., height_subdir=...) at them.")

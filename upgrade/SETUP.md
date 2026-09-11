@@ -181,13 +181,18 @@ step must beat the previous on val MAE (or its own metric) before the next.
 via `--blend`.
 
 1. Get the data (large — grab slices):
-   - **Open-Canopy** (HF, GeoTIFF, 1.5 m): resumable slice download —
+   - **Open-Canopy** — *primary aux slice* (HF, GeoTIFF, 1.5 m, open license):
+     resumable slice download —
      ```powershell
      .venv\Scripts\python.exe -c "import sys; sys.path.insert(0,'upgrade/training'); import aux_datasets as a; a.prefetch_open_canopy('upgrade/data/open_canopy', allow_patterns=None)"
      ```
      (Set `allow_patterns` to grab only a slice — the full set is ~360 GB.)
-   - **GBH** (mediaTUM, 256² patches, 3 m): manual download + **confirm the data
-     license**; unpack RGB + nDSM GeoTIFFs into two folders.
+   - **GBH** — *OPTIONAL, license-gated*. Code: github.com/zhu-xlab/GlobalBuildingAtlas;
+     **data (GBA.Height) is on mediaTUM, NOT HuggingFace** (mediatum.ub.tum.de/1782307).
+     License is **CC BY-NC (non-commercial)** — **confirm the Height license before
+     use**, especially for an ISRO/competition deliverable. Only if it clears: manual
+     download, unpack RGB + nDSM GeoTIFFs into two folders. Otherwise blend
+     Open-Canopy alone (omit `--gbh-root`).
 2. **Confirm the real folder names** and pass them as subdirs (defaults may differ
    from the actual download): the sources take `rgb_subdir` / `height_subdir`.
 3. Train blended (after Stage 1+ on GAMUS):
