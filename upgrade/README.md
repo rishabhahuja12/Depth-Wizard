@@ -60,7 +60,9 @@ Source of truth: `research/MODEL_PERFORMANCE_MASTER_PLAN.md` (+ `DEPTH_MODEL_RES
 | **P1 Stage 2/3** | Add Sobel edge, then HTC long-tail (gated on Stage 1 beating baseline) | not started |
 | **P1 blend** | Add Open-Canopy slice + GBH (harmonized) after GAMUS-only works | not started |
 | **P1b** | Real DEM base terrain (Copernicus/SRTM + CartoDEM for India) | not started |
-| **P2 / P3** | Detail/tiling · mesh "melted-tent" fix | not started |
+| **P2** | Detail/tiling (Live vs Export) | not started |
+| **P3a** | Triplanar texturing | ❌ tried & reverted — wrong lever (see INTEGRATIONS.md) |
+| **P3 (mesh)** | Melted-tent fix | **deferred post-P1**; voxel mode is the primary renderer; skirts (P3b) revisited after P1 sharpens edges |
 | **P4** | Off-nadir = **detect + flag only** (stated limitation; no v2) | not started |
 | **P5** | Super-resolution | likely skipped |
 
