@@ -39,11 +39,11 @@ upgrade/
 ├── README.md            ← this file
 ├── .gitignore           ← ignores heavy local artifacts (checkpoints, data, reports)
 ├── evaluation/          ← P0: baseline harness + metrics + before/after tables
-├── training/            ← P1: metric fine-tune scripts (Large, un-normalized, meters)
-├── data_prep/           ← dataset harmonization (GAMUS + Open-Canopy + GBH) & DEM fetch (P1b)
+├── training/            ← P1: metric losses/dataset/loop, adapters, harmonize, prefetch
+├── inference/           ← P1b DEM base · P2 tiling · P4 off-nadir detect
 ├── outputs/             ← generated reports, metric CSVs, experiment logs   (git-ignored)
 ├── checkpoints/         ← trained model weights                             (git-ignored)
-└── notes/               ← working notes, decisions, scratch
+└── data/                ← prefetched GAMUS cache + manifests                (git-ignored)
 ```
 
 ---
@@ -56,9 +56,13 @@ Source of truth: `research/MODEL_PERFORMANCE_MASTER_PLAN.md` (+ `DEPTH_MODEL_RES
 |---|---|---|
 | **P0** | Evaluation harness + baseline table (held-out `test` split, per-city) | ✅ built & tested; full run pending on workstation |
 | **P1 Task 0** | Audit of the metric-scale deletion points; fresh build in `upgrade/` (backend untouched) | ✅ audited (4 kill-points + broken `CombinedLoss` signature) |
-| **P1 Stage 1** | Un-normalized metric losses + meters dataset + ViT-Large training loop | ✅ built & tested on dev (smoke-verified); full train runs on workstation |
-| **P1 Stage 2/3** | Add Sobel edge, then HTC long-tail (gated on Stage 1 beating baseline) | not started |
-| **P1 blend** | Add Open-Canopy slice + GBH (harmonized) after GAMUS-only works | not started |
+| **P1 Stage 1** | Un-normalized metric losses + meters dataset + ViT-Large training loop | ✅ built & tested; smoke-verified; **train runs on workstation** |
+| **P1 Stage 2/3** | Sobel edge + HTC long-tail losses (weight-gated) | ✅ **built & tested**; execution gated on Stage 1 beating baseline |
+| **P1 adapters** | LoRA/DoRA (fallback / Giant-enabler) | ✅ **built & tested** |
+| **P1 blend** | Open-Canopy + GBH harmonization + balanced mixing | ✅ **built & tested** (GeoTiff adapter); run after GAMUS-only works |
+| **P1b** | Absolute DSM = real DEM base + nDSM (flood-critical) | ✅ **built & tested** (compose + DEM upsample; offline DEM adapter) |
+| **P2** | Tile-based hi-res inference (Export path; Live stays single-pass) | ✅ **built & tested** (seamless stitch) |
+| **P4** | Off-nadir detect + flag (anisotropy cue; never correct/synthesize) | ✅ **built & tested** |
 | **P1b** | Real DEM base terrain (Copernicus/SRTM + CartoDEM for India) | not started |
 | **P2** | Detail/tiling (Live vs Export) | not started |
 | **P3a** | Triplanar texturing | ❌ tried & reverted — wrong lever (see INTEGRATIONS.md) |
