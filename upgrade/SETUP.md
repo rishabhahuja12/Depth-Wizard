@@ -187,21 +187,22 @@ via `--blend`.
      .venv\Scripts\python.exe -c "import sys; sys.path.insert(0,'upgrade/training'); import aux_datasets as a; a.prefetch_open_canopy('upgrade/data/open_canopy', allow_patterns=None)"
      ```
      (Set `allow_patterns` to grab only a slice — the full set is ~360 GB.)
-   - **GBH** — *OPTIONAL, license-gated*. Code: github.com/zhu-xlab/GlobalBuildingAtlas;
-     **data (GBA.Height) is on mediaTUM, NOT HuggingFace** (mediatum.ub.tum.de/1782307).
-     License is **CC BY-NC (non-commercial)** — **confirm the Height license before
-     use**, especially for an ISRO/competition deliverable. Only if it clears: manual
-     download, unpack RGB + nDSM GeoTIFFs into two folders. Otherwise blend
-     Open-Canopy alone (omit `--gbh-root`).
+   - **GBH** — ❌ **DROPPED** (verified). Its paired RGB↔height training data is **not
+     publicly available** — the imagery is PLANET PlanetScope (proprietary); only the
+     derived global height product (GBA.Height, heights only) is public. So it can't
+     feed our RGB→height task. **Blend Open-Canopy alone (omit `--gbh-root`).** Details
+     in `upgrade\DATASET_LICENSES.md`.
 2. **Confirm the real folder names** and pass them as subdirs (defaults may differ
    from the actual download): the sources take `rgb_subdir` / `height_subdir`.
 3. Train blended (after Stage 1+ on GAMUS):
    ```powershell
    .venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume --blend `
-     --oc-root upgrade\data\open_canopy --gbh-root upgrade\data\gbh `
+     --oc-root upgrade\data\open_canopy `
      --aux-fraction 0.3 --aux-gsd 0.5 --crop 512 `
      --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_blend.log
    ```
+   (GBH dropped — Open-Canopy is the sole aux source. `--gbh-root` remains available
+   only if you separately hold licensed paired PLANET rasters.)
    GAMUS keeps native tiling; aux is harmonized (GSD→common grid, meters) and mixed
    at `--aux-fraction` of GAMUS length, balanced across sources.
 

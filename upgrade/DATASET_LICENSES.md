@@ -8,7 +8,7 @@ CC BY-NC data is an OPTIONAL, informed opt-in only.**
 |---|---|---|---|
 | **GAMUS** | CC BY 4.0 | ✅ yes (attribution) | **Core trainer** |
 | **Open-Canopy** | open (see HF card) | ✅ yes | **Primary aux slice** |
-| **GBH / GlobalBuildingAtlas (GBA.Height)** | **CC BY-NC 4.0** | ❌ non-commercial only | License cleared ✅ · **usability TBD** (paired RGB?) |
+| **GBH / GlobalBuildingAtlas (GBA.Height)** | CC BY-NC 4.0 | ❌ non-commercial only | ❌ **DROPPED — paired RGB not publicly available (PLANET proprietary)** |
 
 ## GBH — confirmed terms (from the GlobalBuildingAtlas web viewer ToU)
 - **License:** Creative Commons Attribution-**NonCommercial** 4.0 (CC BY-NC 4.0) —
@@ -27,24 +27,25 @@ CC BY-NC data is an OPTIONAL, informed opt-in only.**
      a model trained on NC data conservatively inherits the NC restriction.
   2. **Attribution + citation:** include the GBA citation (below) in any report,
      slide, or public presentation that uses a GBH-trained model.
-- Core remains **GAMUS + Open-Canopy** (commercial-OK); GBH is an accepted addition
-  under the non-commercial commitment. `--gbh-root` opt-in still applies.
+- Core remains **GAMUS + Open-Canopy** (commercial-OK). **GBH is dropped** — not for
+  licensing (that cleared) but because its paired RGB↔height training data is not
+  publicly available (PLANET proprietary). See the verified usability note below.
 
-### ⚠️ Open USABILITY question for GBH (license ≠ usable)
-The license is cleared, but before relying on GBH verify it can actually feed our
-**RGB → height** task:
-- **GBA.Height on mediaTUM is the height product (nDSM GeoTIFF tiles, indexed by
-  `height_tif.geojson` / `height_zip.geojson`).** Confirm it ships **co-registered
-  optical RGB** paired with each height tile. If it is height rasters ONLY, it is
-  NOT a drop-in training source for us (we need RGB↔height pairs).
-- The HTC-DC Net training imagery is **PLANET (PlanetScope)** — **proprietary**.
-  Planet's own license likely prevents open redistribution of the raw RGB, which is
-  plausibly why only the heights are public. If the paired RGB isn't in the release,
-  sourcing PLANET imagery separately carries its **own commercial license** — a
-  second blocker independent of CC BY-NC.
-- **Action:** inspect a mediaTUM GBA.Height tile set for paired RGB before wiring a
-  real GBH blend. If absent → **drop GBH, blend Open-Canopy alone** (still the safe
-  default). Open-Canopy is confirmed to ship paired SPOT RGB + canopy height.
+### GBH USABILITY — VERIFIED, and it's DROPPED (data not available)
+License was cleared (non-commercial), but a usability check settled it against GBH:
+- HuggingFace `GBA.LoD1` / `GBA.ODbLPolygon` = **polygons + LoD1 JSON only, no imagery**.
+- `GBA.Height` / `GBH` are **not on HuggingFace** (404); GBA.Height lives on mediaTUM
+  and is the global height **product** (nDSM rasters) — **no paired optical RGB**.
+- The HTC-DC-Net repo (the `im2bh` submodule) provides code + "organize your own
+  data" — **no dataset download**.
+- GBH imagery is **PLANET PlanetScope (proprietary)**; it cannot be openly
+  redistributed, which is why the paired (RGB + nDSM) training set isn't public.
+- **Conclusion:** the paired RGB↔height data we'd need is **not publicly available**,
+  so GBH **cannot** feed our RGB→height task. Even self-sourcing PLANET carries its
+  own **commercial** license — a hard conflict with the non-commercial deliverable.
+  → **GBH dropped. Blend Open-Canopy alone** (ships paired SPOT RGB + canopy height,
+  HF, open license). The `gbh_source()` adapter stays in code for anyone who has
+  licensed paired rasters, but is not part of the plan.
 
 ### Code license note
 The GlobalBuildingAtlas **code** is MIT + Commons Clause (no commercial use). We did

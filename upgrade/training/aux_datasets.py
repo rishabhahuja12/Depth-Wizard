@@ -39,7 +39,15 @@ def open_canopy_source(root, rgb_subdir: str = "images", height_subdir: str = "c
 
 def gbh_source(root, rgb_subdir: str = "rgb", height_subdir: str = "ndsm",
                rgb_glob: str = "*.tif") -> GeoTiffHeightSource:
-    """GBH as a height source (nDSM is meters-above-ground). OPTIONAL / license-gated.
+    """GBH as a height source (nDSM is meters-above-ground). DROPPED from the plan.
+
+    Verified: the paired (RGB + nDSM) GBH training data is NOT publicly available —
+    the imagery is PLANET PlanetScope (proprietary); only the derived global height
+    product (GBA.Height, heights only) is public (mediaTUM), and HF has only
+    polygons/LoD1. So GBH cannot feed our RGB->height task; use Open-Canopy instead.
+    This adapter remains only for anyone who separately holds licensed paired
+    rasters. See upgrade/DATASET_LICENSES.md.
+
 
     Data (GBA.Height) is on mediaTUM (NOT HuggingFace); the code repo
     (github.com/zhu-xlab/GlobalBuildingAtlas) is code only. License is CONFIRMED

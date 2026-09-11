@@ -59,7 +59,7 @@ Source of truth: `research/MODEL_PERFORMANCE_MASTER_PLAN.md` (+ `DEPTH_MODEL_RES
 | **P1 Stage 1** | Un-normalized metric losses + meters dataset + ViT-Large training loop | ✅ built & tested; smoke-verified; **train runs on workstation** |
 | **P1 Stage 2/3** | Sobel edge + HTC long-tail losses (weight-gated) | ✅ **built & tested**; execution gated on Stage 1 beating baseline |
 | **P1 adapters** | LoRA/DoRA (fallback / Giant-enabler) | ✅ **built & tested** |
-| **P1 blend** | Open-Canopy + GBH sources + `--blend` wired into training | ✅ **built, wired & CPU-integration-tested**; run after GAMUS-only works. Confirm folder layout + GBH license on the real download |
+| **P1 blend** | Open-Canopy source + `--blend` wired into training | ✅ **built, wired & CPU-integration-tested**; run after GAMUS-only works. **GBH dropped** — paired RGB not public (PLANET proprietary); Open-Canopy is the sole aux slice (see DATASET_LICENSES.md) |
 | **P1b** | Absolute DSM = real DEM base + nDSM (flood-critical) | ✅ **built & tested** (compose + DEM upsample; offline DEM adapter) |
 | **P2** | Tile-based hi-res inference (Export path; Live stays single-pass) | ✅ **built & tested** (seamless stitch) |
 | **P4** | Off-nadir detect + flag (anisotropy cue; never correct/synthesize) | ✅ **built & tested** |
