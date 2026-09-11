@@ -112,9 +112,6 @@ function Terrain({
     uVerticalScale: { value: verticalScale },
     uDisplacementScale: { value: displacementScale },
     uIsRelative: { value: isRelative ? 1.0 : 0.0 },
-    // P3a: how fast the side-projected texture tiles down a vertical face
-    // (world-Y units -> texture repeats). Small = gentle vertical tiling.
-    uTriYScale: { value: 0.06 },
   });
 
   useEffect(() => {
@@ -134,7 +131,6 @@ function Terrain({
       shader.uniforms.uVerticalScale = uniformsRef.current.uVerticalScale;
       shader.uniforms.uDisplacementScale = uniformsRef.current.uDisplacementScale;
       shader.uniforms.uIsRelative = uniformsRef.current.uIsRelative;
-      shader.uniforms.uTriYScale = uniformsRef.current.uTriYScale;
 
       shader.vertexShader = `
         varying vec3 vTerrainWorldPos;
@@ -155,31 +151,8 @@ function Terrain({
         uniform float uVerticalScale;
         uniform float uDisplacementScale;
         uniform float uIsRelative;
-        uniform float uTriYScale;
         ${shader.fragmentShader}
       `.replace(
-        // P3a: triplanar texturing — kill the "melted-tent" vertical smear.
-        // The flat top keeps the exact original UV sampling (blend.y ~ 1), while
-        // steep faces sample the texture projected on the side planes with a
-        // height-varying V, so the roof-edge texels no longer stretch down walls.
-        // The true surface normal is recovered from screen-space derivatives of
-        // the (displaced) world position, so it works despite displacement.
-        '#include <map_fragment>',
-        `
-        #ifdef USE_MAP
-          vec3 triN = normalize(cross(dFdx(vTerrainWorldPos), dFdy(vTerrainWorldPos)));
-          vec3 triBlend = abs(triN);
-          triBlend /= (triBlend.x + triBlend.y + triBlend.z + 1e-5);
-          vec2 uvTop   = vMapUv;
-          vec2 uvSideX = fract(vec2(vMapUv.y, vTerrainWorldPos.y * uTriYScale));
-          vec2 uvSideZ = fract(vec2(vMapUv.x, vTerrainWorldPos.y * uTriYScale));
-          vec4 triColor = texture2D(map, uvTop)   * triBlend.y
-                        + texture2D(map, uvSideX) * triBlend.x
-                        + texture2D(map, uvSideZ) * triBlend.z;
-          diffuseColor *= triColor;
-        #endif
-        `
-      ).replace(
         '#include <dithering_fragment>',
         `
         #include <dithering_fragment>
@@ -223,7 +196,7 @@ function Terrain({
           roughness={0.7}
           metalness={0.1}
           onBeforeCompile={onBeforeCompile}
-          customProgramCacheKey={() => 'terrain_triplanar_contour_mat'}
+          customProgramCacheKey={() => 'terrain_contour_mat'}
         />
       </mesh>
 
