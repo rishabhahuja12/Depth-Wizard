@@ -107,6 +107,16 @@ def _rgb_to_tensor(rgb, crop: int):
 def train(args) -> int:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}  |  model: {args.model}")
+
+    # Resource ceiling: hard-cap the fraction of GPU memory this process may use,
+    # so training stays under ~50% VRAM (leaves the card usable for other work).
+    if device.type == "cuda" and args.max_vram_frac:
+        torch.cuda.set_per_process_memory_fraction(args.max_vram_frac, 0)
+        total = torch.cuda.get_device_properties(0).total_memory / 1e9
+        print(f"VRAM capped at {args.max_vram_frac:.0%} (~{total * args.max_vram_frac:.1f} GB of {total:.1f} GB)")
+    if args.throttle_sleep > 0:
+        print(f"Throttle: sleeping {args.throttle_sleep:.2f}s per step to hold GPU utilization down")
+
     model = load_model(args.model, device)
     model.train()
 
@@ -144,6 +154,11 @@ def train(args) -> int:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optim.step()
                 optim.zero_grad(set_to_none=True)
+
+            # Duty-cycle throttle: idle briefly so average GPU utilization stays
+            # low. We have all weekend; a cool, half-idle card is the goal.
+            if args.throttle_sleep > 0:
+                time.sleep(args.throttle_sleep)
 
         sched.step()
         val_mae = evaluate_mae(model, device, limit=args.val_tiles, crop=args.crop)
@@ -191,8 +206,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default=LARGE_MODEL_ID)
     ap.add_argument("--epochs", type=int, default=35)
-    ap.add_argument("--batch", type=int, default=4)
-    ap.add_argument("--grad-accum", type=int, default=4, dest="grad_accum")
+    ap.add_argument("--batch", type=int, default=2)
+    ap.add_argument("--grad-accum", type=int, default=8, dest="grad_accum")  # eff. batch 16
     ap.add_argument("--crop", type=int, default=518)
     ap.add_argument("--warmup", type=int, default=2)
     ap.add_argument("--enc-lr", type=float, default=5e-6, dest="enc_lr")
@@ -201,6 +216,11 @@ def main() -> int:
     ap.add_argument("--w-l1", type=float, default=1.0, dest="w_l1")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--val-tiles", type=int, default=40, dest="val_tiles")
+    # Resource ceilings (weekend gentle-run defaults keep the GPU under ~50%).
+    ap.add_argument("--max-vram-frac", type=float, default=0.5, dest="max_vram_frac",
+                    help="hard cap on fraction of GPU memory this process may use (0 = uncapped)")
+    ap.add_argument("--throttle-sleep", type=float, default=0.0, dest="throttle_sleep",
+                    help="seconds to idle per step; raise to lower average GPU utilization")
     ap.add_argument("--smoke", action="store_true", help="CPU wiring check, no GAMUS/GPU")
     ap.add_argument("--smoke-size", type=int, default=126, dest="smoke_size")
     args = ap.parse_args()
