@@ -42,11 +42,12 @@ def gbh_source(root, rgb_subdir: str = "rgb", height_subdir: str = "ndsm",
     """GBH as a height source (nDSM is meters-above-ground). OPTIONAL / license-gated.
 
     Data (GBA.Height) is on mediaTUM (NOT HuggingFace); the code repo
-    (github.com/zhu-xlab/GlobalBuildingAtlas) is code only. License is CC BY-NC
-    (non-commercial) for the polygons/LoD1 — CONFIRM the Height license on mediaTUM
-    before any use, especially for a government/competition deliverable. Prefer
-    Open-Canopy (HF, scripted, open) as the primary aux slice; add GBH only if its
-    license clears. Adjust subdirs to the real mediaTUM layout."""
+    (github.com/zhu-xlab/GlobalBuildingAtlas) is code only. License is CONFIRMED
+    CC BY-NC 4.0 — "you may not use the material for commercial purposes" — with
+    attribution + citation required (see upgrade/DATASET_LICENSES.md). Use ONLY if
+    the whole deliverable is non-commercial; a model trained on NC data may inherit
+    the restriction (contested). Otherwise blend Open-Canopy alone (omit gbh_root).
+    Adjust subdirs to the real mediaTUM layout."""
     root = Path(root)
     return GeoTiffHeightSource(name="gbh", gsd=GBH_GSD,
                                rgb_dir=root / rgb_subdir, height_dir=root / height_subdir,
