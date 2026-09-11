@@ -54,9 +54,11 @@ Source of truth: `research/MODEL_PERFORMANCE_MASTER_PLAN.md` (+ `DEPTH_MODEL_RES
 
 | Phase | What | Status |
 |---|---|---|
-| **P0** | Evaluation harness + baseline table (hold out one GAMUS city) | not started |
-| **P1 Task 0** | Un-normalize pipeline · backbone → Large · fix drifted code | not started |
-| **P1** | Retrain to metric meters — **GAMUS first**, then blend **Open-Canopy slice + GBH whole** (harmonized) | not started |
+| **P0** | Evaluation harness + baseline table (held-out `test` split, per-city) | ✅ built & tested; full run pending on workstation |
+| **P1 Task 0** | Audit of the metric-scale deletion points; fresh build in `upgrade/` (backend untouched) | ✅ audited (4 kill-points + broken `CombinedLoss` signature) |
+| **P1 Stage 1** | Un-normalized metric losses + meters dataset + ViT-Large training loop | ✅ built & tested on dev (smoke-verified); full train runs on workstation |
+| **P1 Stage 2/3** | Add Sobel edge, then HTC long-tail (gated on Stage 1 beating baseline) | not started |
+| **P1 blend** | Add Open-Canopy slice + GBH (harmonized) after GAMUS-only works | not started |
 | **P1b** | Real DEM base terrain (Copernicus/SRTM + CartoDEM for India) | not started |
 | **P2 / P3** | Detail/tiling · mesh "melted-tent" fix | not started |
 | **P4** | Off-nadir = **detect + flag only** (stated limitation; no v2) | not started |
