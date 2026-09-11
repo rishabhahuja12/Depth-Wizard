@@ -84,6 +84,22 @@ Outputs land in `upgrade\outputs\`:
 
 ---
 
+## 9. Run P1 Stage 1 — metric fine-tune (after the P0 baseline exists)
+First a CPU wiring check (no GPU/GAMUS, uses the cached small model):
+```powershell
+.venv\Scripts\python.exe upgrade\training\train_metric.py --smoke
+```
+Then the real Stage-1 fine-tune on the GPU (downloads DA2-Large ~1.3 GB once,
+streams the GAMUS train split, early-stops on held-out val MAE):
+```powershell
+.venv\Scripts\python.exe upgrade\training\train_metric.py
+```
+- Output checkpoint: `upgrade\checkpoints\metric_best.pth` (+ its held-out MAE).
+- VRAM tight? drop to `--batch 2 --grad-accum 8`.
+- **Kill-gate:** Stage-1 (SiLog+Smooth-L1 in meters) must beat the P0 baseline MAE
+  before adding edge (Stage 2) or long-tail (Stage 3). If it doesn't, debug data/
+  scaling first — do NOT stack more losses on a broken base.
+
 ## Sanity: unit tests run anywhere (CPU fine), no GPU needed
 ```powershell
 .venv\Scripts\python.exe upgrade\evaluation\tests\test_metrics.py
