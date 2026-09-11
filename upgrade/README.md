@@ -69,3 +69,10 @@ Source of truth: `research/MODEL_PERFORMANCE_MASTER_PLAN.md` (+ `DEPTH_MODEL_RES
   common ground resolution; GBH license still to verify).
 - **Off-nadir:** detect + flag only. No v2 (instance building-reconstruction) — data-limited
   and out of scope for this effort.
+
+### Verified facts
+- **GAMUS GSD = 0.33 m/pixel** (arXiv:2305.14914, "resolution of 0.33m") — RGB + nDSM.
+- **GAMUS labels = nDSM, meters above ground** (DSM − DTM) → no sea-level datum, which is
+  exactly why P1b's DEM base anchor is required.
+- **Held-out set = the `test` split**; the model was fine-tuned on `train`. Filenames encode
+  city (`DC_…`, `PHL_…`) so per-city breakdown works.

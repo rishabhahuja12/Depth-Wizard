@@ -87,7 +87,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--split", default="test")
     ap.add_argument("--limit", type=int, default=None, help="cap tiles (smoke test); default = full split")
-    ap.add_argument("--gsd", type=float, default=0.5, help="assumed GAMUS meters/pixel (UNVERIFIED — see report)")
+    ap.add_argument("--gsd", type=float, default=0.33,
+                    help="GAMUS meters/pixel (VERIFIED 0.33 m — arXiv:2305.14914)")
     ap.add_argument("--out", default=str(REPO_ROOT / "upgrade" / "outputs"))
     args = ap.parse_args()
 
@@ -128,7 +129,7 @@ def main() -> int:
             "split": args.split,
             "tiles_evaluated": n_tiles,
             "limit": args.limit if args.limit is not None else "full split",
-            "assumed_gsd_m": f"{args.gsd} (UNVERIFIED)",
+            "gsd_m": f"{args.gsd} (verified — arXiv:2305.14914)",
             "model_id": __import__("app.config", fromlist=["MODEL_ID"]).MODEL_ID,
             "device": str(estimator.device),
         },

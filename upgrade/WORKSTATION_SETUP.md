@@ -77,8 +77,8 @@ Outputs land in `upgrade\outputs\`:
 > per baseline. Re-running is cheap after the download is cached.
 
 ## 8. Still open before the numbers are final
-- **Verify GAMUS GSD** (currently assumed 0.5 m via `--gsd`, UNVERIFIED). It scales
-  the "as-shipped" metric block. Confirm from the dataset source, then pass `--gsd`.
+- **GAMUS GSD = 0.33 m** — VERIFIED (arXiv:2305.14914, "resolution of 0.33m"); it is
+  now the `--gsd` default, no action needed.
 - **Boundary-F sanity** — came out ~0 on the dev smoke run (blurry ViT-S edges as
   expected, but the edge threshold deserves one look on real GPU output).
 
