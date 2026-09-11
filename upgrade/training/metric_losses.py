@@ -61,16 +61,69 @@ class SmoothL1Metric(nn.Module):
         return F.smooth_l1_loss(pred[mask], target[mask], beta=self.beta)
 
 
+class EdgeGradientLoss(nn.Module):
+    """Stage-2: Sobel gradient matching in meters — sharpens building/ridge edges.
+    L1 between the Sobel responses of prediction and target. Unlike the backend
+    version, no [0,1] clamp: it operates on metric heights directly."""
+
+    def __init__(self):
+        super().__init__()
+        sx = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=torch.float32).reshape(1, 1, 3, 3)
+        sy = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=torch.float32).reshape(1, 1, 3, 3)
+        self.register_buffer("sx", sx)
+        self.register_buffer("sy", sy)
+
+    def _to_bchw(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 2:
+            return x.unsqueeze(0).unsqueeze(0)
+        if x.dim() == 3:
+            return x.unsqueeze(1)
+        return x
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        p = torch.nan_to_num(self._to_bchw(pred).float())
+        t = torch.nan_to_num(self._to_bchw(target).float())
+        sx, sy = self.sx.to(p.dtype), self.sy.to(p.dtype)
+        pdx, pdy = F.conv2d(p, sx, padding=1), F.conv2d(p, sy, padding=1)
+        tdx, tdy = F.conv2d(t, sx, padding=1), F.conv2d(t, sy, padding=1)
+        return (pdx - tdx).abs().mean() + (pdy - tdy).abs().mean()
+
+
+class LongTailWeightedL1(nn.Module):
+    """Stage-3 (HTC-style): L1 where tall-structure pixels are up-weighted, so
+    abundant ground pixels don't drown the gradient on the rare tall buildings
+    (the documented tall-structure underestimation). weight = clamp(1 + t/scale,
+    1, max_weight)."""
+
+    def __init__(self, height_scale: float = 15.0, max_weight: float = 5.0):
+        super().__init__()
+        self.height_scale = height_scale
+        self.max_weight = max_weight
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        mask = _finite_range_mask(target) & torch.isfinite(pred)
+        if mask.sum() < 1:
+            return pred.sum() * 0.0
+        p, t = pred[mask].float(), target[mask].float()
+        w = torch.clamp(1.0 + t / self.height_scale, min=1.0, max=self.max_weight)
+        return (w * (p - t).abs()).sum() / w.sum()
+
+
 class MetricLoss(nn.Module):
-    """Stage-1 composite: weighted SILog + Smooth-L1, all in meters."""
+    """Staged composite, all in meters. Stage 1 = SILog + Smooth-L1 (w_grad,
+    w_lt = 0); Stage 2 adds the edge term; Stage 3 adds long-tail reweighting.
+    Staging is controlled purely by the weights."""
 
     def __init__(self, w_silog: float = 1.0, w_l1: float = 1.0,
-                 lambd: float = 0.85, beta: float = 1.0):
+                 w_grad: float = 0.0, w_lt: float = 0.0,
+                 lambd: float = 0.85, beta: float = 1.0,
+                 height_scale: float = 15.0, max_weight: float = 5.0):
         super().__init__()
-        self.w_silog = w_silog
-        self.w_l1 = w_l1
+        self.w_silog, self.w_l1, self.w_grad, self.w_lt = w_silog, w_l1, w_grad, w_lt
         self.silog = SILogMetric(lambd=lambd)
         self.l1 = SmoothL1Metric(beta=beta)
+        self.grad = EdgeGradientLoss()
+        self.lt = LongTailWeightedL1(height_scale=height_scale, max_weight=max_weight)
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         total = pred.sum() * 0.0
@@ -78,4 +131,8 @@ class MetricLoss(nn.Module):
             total = total + self.w_silog * self.silog(pred, target)
         if self.w_l1:
             total = total + self.w_l1 * self.l1(pred, target)
+        if self.w_grad:
+            total = total + self.w_grad * self.grad(pred, target)
+        if self.w_lt:
+            total = total + self.w_lt * self.lt(pred, target)
         return total

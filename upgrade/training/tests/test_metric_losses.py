@@ -78,6 +78,42 @@ def test_combined_weight_selects_component():
     _close(silog_only, ml.SILogMetric()(pred, t), label="combined = silog when w_l1=0")
 
 
+# --- Stage 2: edge (Sobel gradient) loss ---
+
+def test_edge_loss_zero_on_perfect_prediction():
+    t = torch.zeros(1, 8, 8)
+    t[:, :, 4:] = 10.0  # a vertical step
+    loss = ml.EdgeGradientLoss()(t.clone(), t.clone())
+    _close(loss, 0.0, label="edge perfect")
+
+
+def test_edge_loss_positive_when_edge_missing():
+    t = torch.zeros(1, 8, 8)
+    t[:, :, 4:] = 10.0          # target has an edge
+    pred = torch.zeros(1, 8, 8)  # prediction is flat -> misses the edge
+    assert ml.EdgeGradientLoss()(pred, t) > 0.1, "edge loss should penalize a missing edge"
+
+
+# --- Stage 3: long-tail (tall-structure) reweighting ---
+
+def test_longtail_upweights_tall_pixels():
+    # Ground pixel (0 m) has 0 error; tall pixel (30 m) has 4 m error.
+    # Unweighted mean would be 2.0. Weights: ground=1, tall=clamp(1+30/15,1,5)=3.
+    # Weighted = (1*0 + 3*4)/(1+3) = 3.0 > 2.0 — the tall error dominates.
+    t = torch.tensor([[0.0, 30.0]])
+    pred = torch.tensor([[0.0, 34.0]])
+    lt = ml.LongTailWeightedL1(height_scale=15.0, max_weight=5.0)(pred, t)
+    _close(lt, 3.0, tol=1e-5, label="longtail weighted (tall dominates)")
+
+
+def test_longtail_equals_plain_when_all_ground():
+    # With all-ground targets, weights collapse to 1 -> equals plain L1 (=error).
+    t = torch.tensor([[0.0, 0.0, 0.0]])
+    pred = torch.tensor([[1.0, 1.0, 1.0]])
+    lt = ml.LongTailWeightedL1(height_scale=15.0)(pred, t)
+    _close(lt, 1.0, tol=1e-5, label="longtail ~ plain L1 on ground")
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

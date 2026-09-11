@@ -132,7 +132,11 @@ def train(args) -> int:
         model.to(device)
     model.train()
 
-    criterion = ml.MetricLoss(w_silog=args.w_silog, w_l1=args.w_l1).to(device)
+    criterion = ml.MetricLoss(w_silog=args.w_silog, w_l1=args.w_l1,
+                              w_grad=args.w_grad, w_lt=args.w_lt).to(device)
+    stage = 1 + (args.w_grad > 0) + (args.w_lt > 0)
+    print(f"Loss stage {stage}: silog={args.w_silog} l1={args.w_l1} "
+          f"grad={args.w_grad} longtail={args.w_lt}")
     optim = torch.optim.AdamW(
         build_param_groups(model, args.enc_lr, args.head_lr), weight_decay=0.01
     )
@@ -237,6 +241,10 @@ def main() -> int:
     ap.add_argument("--head-lr", type=float, default=5e-5, dest="head_lr")
     ap.add_argument("--w-silog", type=float, default=1.0, dest="w_silog")
     ap.add_argument("--w-l1", type=float, default=1.0, dest="w_l1")
+    ap.add_argument("--w-grad", type=float, default=0.0, dest="w_grad",
+                    help="Stage 2: Sobel edge loss weight (0 = off)")
+    ap.add_argument("--w-lt", type=float, default=0.0, dest="w_lt",
+                    help="Stage 3: long-tail tall-structure weight (0 = off)")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--val-tiles", type=int, default=40, dest="val_tiles")
     # Resource ceilings (weekend gentle-run defaults keep the GPU under ~50%).
