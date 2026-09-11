@@ -8,7 +8,7 @@ CC BY-NC data is an OPTIONAL, informed opt-in only.**
 |---|---|---|---|
 | **GAMUS** | CC BY 4.0 | ✅ yes (attribution) | **Core trainer** |
 | **Open-Canopy** | open (see HF card) | ✅ yes | **Primary aux slice** |
-| **GBH / GlobalBuildingAtlas (GBA.Height)** | **CC BY-NC 4.0** | ❌ **NON-commercial only** | **Optional, gated** |
+| **GBH / GlobalBuildingAtlas (GBA.Height)** | **CC BY-NC 4.0** | ❌ non-commercial only | License cleared ✅ · **usability TBD** (paired RGB?) |
 
 ## GBH — confirmed terms (from the GlobalBuildingAtlas web viewer ToU)
 - **License:** Creative Commons Attribution-**NonCommercial** 4.0 (CC BY-NC 4.0) —
@@ -19,12 +19,37 @@ CC BY-NC data is an OPTIONAL, informed opt-in only.**
   repo (zhu-xlab/GlobalBuildingAtlas) is code only.
 
 ### Decision (recorded)
-- Core = **GAMUS + Open-Canopy** (both commercial-OK) → the model stays license-clean.
-- **GBH is used ONLY IF** the entire DepthWizard/ISRO deliverable is confirmed
-  non-commercial. Open question (do NOT assume resolved): whether a model *trained
-  on* NC data inherits the NC restriction — CC's stance on ML training is contested,
-  so the conservative reading is that it does. If in any doubt, **omit `--gbh-root`**
-  and blend Open-Canopy alone.
+- **The DepthWizard / ISRO SAC deliverable is confirmed NON-COMMERCIAL** (project
+  owner, this branch). → **GBH is CLEARED for use** alongside GAMUS + Open-Canopy.
+- **Obligations that come with using GBH (must honor):**
+  1. **Keep the deliverable non-commercial.** If it ever moves toward commercial
+     use, GBH (and any model trained on it) must be removed / retrained without it —
+     a model trained on NC data conservatively inherits the NC restriction.
+  2. **Attribution + citation:** include the GBA citation (below) in any report,
+     slide, or public presentation that uses a GBH-trained model.
+- Core remains **GAMUS + Open-Canopy** (commercial-OK); GBH is an accepted addition
+  under the non-commercial commitment. `--gbh-root` opt-in still applies.
+
+### ⚠️ Open USABILITY question for GBH (license ≠ usable)
+The license is cleared, but before relying on GBH verify it can actually feed our
+**RGB → height** task:
+- **GBA.Height on mediaTUM is the height product (nDSM GeoTIFF tiles, indexed by
+  `height_tif.geojson` / `height_zip.geojson`).** Confirm it ships **co-registered
+  optical RGB** paired with each height tile. If it is height rasters ONLY, it is
+  NOT a drop-in training source for us (we need RGB↔height pairs).
+- The HTC-DC Net training imagery is **PLANET (PlanetScope)** — **proprietary**.
+  Planet's own license likely prevents open redistribution of the raw RGB, which is
+  plausibly why only the heights are public. If the paired RGB isn't in the release,
+  sourcing PLANET imagery separately carries its **own commercial license** — a
+  second blocker independent of CC BY-NC.
+- **Action:** inspect a mediaTUM GBA.Height tile set for paired RGB before wiring a
+  real GBH blend. If absent → **drop GBH, blend Open-Canopy alone** (still the safe
+  default). Open-Canopy is confirmed to ship paired SPOT RGB + canopy height.
+
+### Code license note
+The GlobalBuildingAtlas **code** is MIT + Commons Clause (no commercial use). We did
+**not** use their code — our HTC-style long-tail loss is our own implementation of
+the *idea* from the paper, so there is no code-license entanglement.
 
 ### Required GBH citation (if used)
 ```bibtex
