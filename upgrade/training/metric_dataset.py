@@ -58,56 +58,112 @@ def normalize_rgb(rgb_patch: np.ndarray) -> np.ndarray:
     return np.transpose(x, (2, 0, 1)).copy()
 
 
+# --------------------------- offline manifest readers ---------------------------
+
+def offline_tiles(manifest_path) -> list[dict]:
+    """Read a prefetch manifest (produced by gamus_prefetch) — list of tile dicts
+    with rgb_local/agl_local/city/tile_id. Pure JSON, no network."""
+    import json
+    return json.loads(Path(manifest_path).read_text(encoding="utf-8"))["tiles"]
+
+
+def _read_h5_pair(rgb_local: str, agl_local: str):
+    import h5py
+    with h5py.File(rgb_local, "r") as f:
+        rgb_full = np.array(f["image"])
+    with h5py.File(agl_local, "r") as f:
+        agl_full = np.array(f["image"]).astype(np.float32)
+    if rgb_full.ndim == 2:
+        rgb_full = np.repeat(rgb_full[..., None], 3, axis=-1)
+    return rgb_full[..., :3], agl_full
+
+
+def iter_manifest_full_tiles(manifest_path, limit: int | None = None):
+    """Yield (tile_id, city, rgb_full, agl_full) from a prefetched split, offline.
+    Used for held-out evaluation without touching HuggingFace."""
+    tiles = offline_tiles(manifest_path)
+    if limit is not None:
+        tiles = tiles[:limit]
+    for t in tiles:
+        try:
+            rgb_full, agl_full = _read_h5_pair(t["rgb_local"], t["agl_local"])
+        except Exception as e:  # noqa: BLE001
+            print(f"  skip {t.get('tile_id')}: {type(e).__name__}: {e}")
+            continue
+        yield t["tile_id"], t["city"], rgb_full, agl_full
+
+
 # --------------------------- dataset ---------------------------
 
 class MetricGAMUSDataset:
     """torch Dataset over GAMUS RGB->nDSM(meters) pairs for metric fine-tuning.
 
-    Imports of torch / h5py / huggingface_hub are deferred to construction so the
-    pure helpers above stay importable (and unit-testable) without them.
+    Two modes:
+      * offline=True  -> reads a prefetch manifest and local h5 files, NO network
+        (use after running gamus_prefetch; robust to internet drops).
+      * offline=False -> lazily lists + downloads tiles from HuggingFace, with
+        retries; caches to disk as it goes.
+
+    Heavy imports are deferred so the pure helpers above stay unit-testable.
     """
 
     def __init__(self, split: str = "train", crop: int = 518, augment: bool = True,
-                 cache_dir: Path | None = None, seed: int = 42, repo: str = "earthflow/GAMUS"):
+                 cache_dir: Path | None = None, seed: int = 42, repo: str = "earthflow/GAMUS",
+                 offline: bool = False, manifest_path: Path | None = None, retries: int = 4):
         from torch.utils.data import Dataset  # noqa: F401  (marker that torch is available)
-        from huggingface_hub import list_repo_files
 
         self.split = split
         self.crop = crop
         self.augment = augment
         self.repo = repo
-        self.cache_dir = cache_dir or (Path(__file__).resolve().parent.parent / "data" / "gamus_train")
+        self.offline = offline
+        self.retries = retries
+        self.cache_dir = cache_dir or (Path(__file__).resolve().parent.parent / "data" / "gamus_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.rng = np.random.default_rng(seed)
 
-        all_files = list_repo_files(repo, repo_type="dataset")
-        prefix = f"images/{split}/"
-        self.rgb_files = sorted(f for f in all_files if f.startswith(prefix) and f.endswith("_RGB.h5"))
+        if offline:
+            mp = Path(manifest_path) if manifest_path else self.cache_dir / f"manifest_{split}.json"
+            if not mp.exists():
+                raise FileNotFoundError(
+                    f"Offline mode but no manifest at {mp}. Run gamus_prefetch first.")
+            self.tiles = offline_tiles(mp)
+        else:
+            from huggingface_hub import list_repo_files
+            all_files = list_repo_files(repo, repo_type="dataset")
+            prefix = f"images/{split}/"
+            self.rgb_files = sorted(f for f in all_files if f.startswith(prefix) and f.endswith("_RGB.h5"))
 
     def __len__(self) -> int:
-        return len(self.rgb_files)
+        return len(self.tiles) if self.offline else len(self.rgb_files)
 
     def _agl_for(self, rgb_rel: str) -> str:
         return rgb_rel.replace("images/", "heights/").replace("_RGB.h5", "_AGL.h5")
 
-    def __getitem__(self, idx: int):
-        import h5py
-        import torch
+    def _load_full(self, idx: int):
+        if self.offline:
+            t = self.tiles[idx]
+            return _read_h5_pair(t["rgb_local"], t["agl_local"])
+        # online: download-with-retry, then read
+        import time
         from huggingface_hub import hf_hub_download
-
         rgb_rel = self.rgb_files[idx]
         agl_rel = self._agl_for(rgb_rel)
-        rgb_path = hf_hub_download(self.repo, rgb_rel, repo_type="dataset", local_dir=self.cache_dir)
-        agl_path = hf_hub_download(self.repo, agl_rel, repo_type="dataset", local_dir=self.cache_dir)
+        last = None
+        for attempt in range(self.retries):
+            try:
+                rgb_p = hf_hub_download(self.repo, rgb_rel, repo_type="dataset", local_dir=self.cache_dir)
+                agl_p = hf_hub_download(self.repo, agl_rel, repo_type="dataset", local_dir=self.cache_dir)
+                return _read_h5_pair(rgb_p, agl_p)
+            except Exception as e:  # noqa: BLE001
+                last = e
+                time.sleep(2.0 * (attempt + 1))
+        raise RuntimeError(f"failed to load tile {idx} after {self.retries} tries: {last}")
 
-        with h5py.File(rgb_path, "r") as f:
-            rgb_full = np.array(f["image"])
-        with h5py.File(agl_path, "r") as f:
-            agl_full = np.array(f["image"]).astype(np.float32)
+    def __getitem__(self, idx: int):
+        import torch
 
-        if rgb_full.ndim == 2:
-            rgb_full = np.repeat(rgb_full[..., None], 3, axis=-1)
-        rgb_full = rgb_full[..., :3]
+        rgb_full, agl_full = self._load_full(idx)
 
         h, w = agl_full.shape[:2]
         r1, r2, c1, c2 = random_crop_box(h, w, self.crop, self.rng)

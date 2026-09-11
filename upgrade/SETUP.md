@@ -54,18 +54,33 @@ then set roughly half (needs an elevated shell):
 nvidia-smi -q -d POWER | Select-String "Max Power Limit"     # e.g. 210 W
 nvidia-smi -pl 105                                           # ~50% of max
 ```
-(If `-pl` is refused, skip it — the throttle in step 7 still holds utilization down.)
+(If `-pl` is refused, skip it — the throttle in step 9 still holds utilization down.)
 
 **(b) VRAM** — hard-capped in-process to 50% by the `--max-vram-frac 0.5` flag below
 (+ batch 2 + gradient checkpointing), so the run stays under ~12 GB of 24 GB.
 
 **(c) Utilization** — the `--throttle-sleep` flag idles briefly each step so average
-GPU utilization stays low. Start at 0.15 s and tune (step 9).
+GPU utilization stays low. Start at 0.15 s and tune (step 10).
 
 ---
 
-## 7. P0 baseline first (the BEFORE table)
-Smoke, then full:
+## 7. One-time prefetch — the ONLY step that needs internet
+Download the whole **train + val** split **and** the DA2-Large model ONCE, so the
+long training run can then go fully offline. It is **resumable** (the "dataset
+checkpoint"): re-running skips whatever's already on disk, so a dropped connection
+is harmless — just run it again.
+```powershell
+.venv\Scripts\python.exe upgrade\training\gamus_prefetch.py
+```
+- Caches to `upgrade\data\gamus_cache\` and writes `manifest_train.json` / `manifest_val.json`.
+- Also caches the model for offline loading.
+- Tens of GB — check disk space. Re-run until it prints **"All set"**.
+
+> After this, **training (step 9) needs no internet at all** — you can unplug it.
+
+## 8. P0 baseline (the BEFORE table)
+Smoke, then full. (This uses the `test` split and streams online — a short one-shot
+run, so a connection here is fine; it's the multi-day *training* we made offline.)
 ```powershell
 .venv\Scripts\python.exe upgrade\evaluation\run_baseline.py --limit 5
 .venv\Scripts\python.exe upgrade\evaluation\run_baseline.py
@@ -74,17 +89,18 @@ Outputs → `upgrade\outputs\baseline_report.md` + `baseline_metrics.csv`.
 
 ---
 
-## 8. P1 Stage 1 — gentle metric fine-tune
+## 9. P1 Stage 1 — gentle metric fine-tune (OFFLINE)
 
 Wiring check (CPU, no GPU/GAMUS):
 ```powershell
 .venv\Scripts\python.exe upgrade\training\train_metric.py --smoke
 ```
 
-The weekend run — **low LR, small batch, VRAM-capped, throttled** — logged to a file
-so it survives a disconnect:
+The weekend run — **offline, low LR, small batch, VRAM-capped, throttled** — logged
+to a file so it survives a disconnect. `--offline` reads only the prefetched data,
+so you can literally unplug the network:
 ```powershell
-.venv\Scripts\python.exe upgrade\training\train_metric.py `
+.venv\Scripts\python.exe upgrade\training\train_metric.py --offline `
   --epochs 50 --warmup 3 `
   --enc-lr 2.5e-6 --head-lr 2.5e-5 `
   --batch 2 --grad-accum 8 --crop 518 `
@@ -94,6 +110,7 @@ so it survives a disconnect:
 What each choice does:
 | Flag | Value | Why |
 |---|---|---|
+| `--offline` | on | read only prefetched local data — **no internet, immune to drops** |
 | `--enc-lr / --head-lr` | 2.5e-6 / 2.5e-5 | **Half the standard low LRs** — gentle, steady; we have time |
 | `--epochs / --warmup` | 50 / 3 | Low LR needs more epochs; longer warmup = softer start |
 | `--batch / --grad-accum` | 2 / 8 | eff. batch 16 but tiny VRAM footprint |
@@ -101,12 +118,15 @@ What each choice does:
 | `--throttle-sleep` | 0.15 | idles each step → holds average GPU utilization down |
 
 Output checkpoint: `upgrade\checkpoints\metric_best.pth` (+ its held-out val MAE).
-First epoch is slow (streams/caches the GAMUS train split); later epochs are faster.
+All tiles are already on disk (step 7), so every epoch reads locally.
 Rough budget: ~20–30 h for 50 throttled epochs — comfortably a weekend.
+
+> Requires step 7 to have finished. If a manifest is missing it errors immediately
+> ("Offline mode but no manifest ... Run gamus_prefetch first") rather than hanging.
 
 ---
 
-## 9. Watch it stay under 50% (in a second shell)
+## 10. Watch it stay under 50% (in a second shell)
 ```powershell
 while ($true) { nvidia-smi --query-gpu=utilization.gpu,memory.used,power.draw --format=csv,noheader; Start-Sleep 5 }
 ```
@@ -116,7 +136,7 @@ while ($true) { nvidia-smi --query-gpu=utilization.gpu,memory.used,power.draw --
 
 ---
 
-## 10. The kill-gate (why we measured first)
+## 11. The kill-gate (why we measured first)
 Compare `train_stage1.log`'s best **val MAE** against the P0 baseline MAE:
 - **Beats baseline** → proceed to Stage 2 (add the Sobel edge loss), then Stage 3.
 - **Doesn't beat it** → debug data/scaling BEFORE stacking more losses. Don't pile
@@ -132,4 +152,5 @@ Bring both numbers back and we'll decide Stage 2 together.
 .venv\Scripts\python.exe upgrade\training\tests\test_metric_losses.py
 .venv\Scripts\python.exe upgrade\training\tests\test_metric_dataset.py
 .venv\Scripts\python.exe upgrade\training\tests\test_train_helpers.py
+.venv\Scripts\python.exe upgrade\training\tests\test_prefetch.py
 ```

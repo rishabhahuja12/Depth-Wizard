@@ -34,6 +34,7 @@ import metric_losses as ml  # noqa: E402
 LARGE_MODEL_ID = "depth-anything/Depth-Anything-V2-Large-hf"
 SMALL_MODEL_ID = "depth-anything/Depth-Anything-V2-Small-hf"
 CKPT_DIR = UPGRADE_DIR / "checkpoints"
+DATA_CACHE = UPGRADE_DIR / "data" / "gamus_cache"
 
 
 # --------------------------- pure helpers (unit-tested) ---------------------------
@@ -77,15 +78,21 @@ def predict_depth(model, images: torch.Tensor, out_hw) -> torch.Tensor:
 # --------------------------- validation (held-out MAE) ---------------------------
 
 @torch.no_grad()
-def evaluate_mae(model, device, limit: int, crop: int) -> float:
+def evaluate_mae(model, device, limit: int, crop: int, offline: bool, cache_dir) -> float:
     """Direct metric MAE on a held-out val subset — no calibration, no normalization."""
     import numpy as np
-    import gamus_eval_loader as loader
     import metrics
+
+    if offline:
+        import metric_dataset as md
+        src = md.iter_manifest_full_tiles(Path(cache_dir) / "manifest_val.json", limit=limit)
+    else:
+        import gamus_eval_loader as loader
+        src = loader.iter_eval_tiles("val", limit=limit)
 
     model.eval()
     errs = []
-    for _tid, _city, rgb, agl in loader.iter_eval_tiles("val", limit=limit):
+    for _tid, _city, rgb, agl in src:
         x = _rgb_to_tensor(rgb, crop).to(device)
         pred = predict_depth(model, x.unsqueeze(0), agl.shape).squeeze(0).float().cpu().numpy()
         errs.append(metrics.mae(pred, agl))
@@ -130,10 +137,12 @@ def train(args) -> int:
 
     from torch.utils.data import DataLoader
     import metric_dataset as md
-    dataset = md.MetricGAMUSDataset(split="train", crop=args.crop, augment=True)
+    dataset = md.MetricGAMUSDataset(split="train", crop=args.crop, augment=True,
+                                    offline=args.offline, cache_dir=Path(args.cache_dir))
     loader = DataLoader(dataset, batch_size=args.batch, shuffle=True,
                         num_workers=args.workers, pin_memory=True, drop_last=True)
-    print(f"Train tiles: {len(dataset)} | batch {args.batch} x grad-accum {args.grad_accum}")
+    print(f"Train tiles: {len(dataset)} | batch {args.batch} x grad-accum {args.grad_accum}"
+          f"{' | OFFLINE' if args.offline else ''}")
 
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
     best_mae = float("inf")
@@ -161,7 +170,8 @@ def train(args) -> int:
                 time.sleep(args.throttle_sleep)
 
         sched.step()
-        val_mae = evaluate_mae(model, device, limit=args.val_tiles, crop=args.crop)
+        val_mae = evaluate_mae(model, device, limit=args.val_tiles, crop=args.crop,
+                               offline=args.offline, cache_dir=args.cache_dir)
         dt = (time.time() - t0) / 60
         print(f"[epoch {epoch+1}/{args.epochs}] train_loss={running/max(len(loader),1):.4f} "
               f"val_MAE={val_mae:.3f} m  ({dt:.1f} min)")
@@ -221,9 +231,22 @@ def main() -> int:
                     help="hard cap on fraction of GPU memory this process may use (0 = uncapped)")
     ap.add_argument("--throttle-sleep", type=float, default=0.0, dest="throttle_sleep",
                     help="seconds to idle per step; raise to lower average GPU utilization")
+    ap.add_argument("--offline", action="store_true",
+                    help="read only local prefetched data (run gamus_prefetch first); no network")
+    ap.add_argument("--cache-dir", default=str(DATA_CACHE), dest="cache_dir",
+                    help="local GAMUS cache / manifest dir (matches gamus_prefetch)")
     ap.add_argument("--smoke", action="store_true", help="CPU wiring check, no GAMUS/GPU")
     ap.add_argument("--smoke-size", type=int, default=126, dest="smoke_size")
     args = ap.parse_args()
+
+    if args.offline:
+        # Force HuggingFace fully offline BEFORE transformers/hf_hub are used, so a
+        # missing network never stalls the run. Everything must be prefetched.
+        import os
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["HF_DATASETS_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
     return smoke(args) if args.smoke else train(args)
 
 

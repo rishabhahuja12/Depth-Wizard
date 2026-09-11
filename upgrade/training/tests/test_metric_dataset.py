@@ -71,6 +71,23 @@ def test_apply_augment_identity_when_no_ops():
     assert np.array_equal(rgb_a, rgb) and np.array_equal(depth_a, depth)
 
 
+def test_offline_tiles_reads_manifest_without_network():
+    # Build a manifest on disk (as gamus_prefetch would) and confirm the dataset
+    # can enumerate tiles from it with NO HuggingFace calls.
+    import tempfile
+    import gamus_prefetch as pf
+
+    with tempfile.TemporaryDirectory() as d:
+        manifest_path = Path(d) / "manifest_train.json"
+        pf.save_manifest(manifest_path, pf.build_manifest(
+            ["images/train/DC_1_RGB.h5", "images/train/JAX_2_RGB.h5"], Path(d)))
+        tiles = md.offline_tiles(manifest_path)
+        assert len(tiles) == 2
+        assert tiles[0]["city"] == "DC" and tiles[0]["tile_id"] == "DC_1"
+        assert tiles[0]["rgb_local"].endswith("DC_1_RGB.h5")
+        assert tiles[0]["agl_local"].endswith("DC_1_AGL.h5")
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
