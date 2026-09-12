@@ -4,7 +4,7 @@
 train the height-estimation model, why each one matters, what it adds, and the
 catches that come with it. Written to be readable without a remote-sensing
 background. For the licensing/legal details see `DATASET_LICENSES.md`; for the
-run commands see `SETUP.md`.*
+run commands see `../SETUP.md`.*
 
 ---
 
@@ -291,4 +291,4 @@ the mechanical ones automatically.
 ---
 
 *Last updated: 2026-09. Companion docs: `DATASET_LICENSES.md` (legal/licence detail),
-`SETUP.md` (how to run training and the blend).*
+`../SETUP.md` (how to run training and the blend).*

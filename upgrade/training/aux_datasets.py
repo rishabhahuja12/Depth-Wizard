@@ -3,7 +3,7 @@ Auxiliary height datasets — all paired RGB + height-in-meters, all plugging in
 tested GeoTiffHeightSource and mixing through MixedMetricDataset onto the SAME height
 head (research §2.8/§2.9). Sequencing: blend these ONLY after GAMUS-alone beats the
 baseline. Adopted flow: GAMUS → +Open-Canopy → +M4Heights → +DFC2023 → NL builder;
-US3D/GeoNRW are fallbacks. See upgrade/DATASETS_GUIDE.md.
+US3D/GeoNRW are fallbacks. See upgrade/docs/DATASETS_GUIDE.md.
 
 Confirmed specs (see DATASETS_GUIDE / DATASET_LICENSES):
   * Open-Canopy — HF AI4Forest/Open-Canopy, 1.5 m, France; SPOT RGB + LiDAR canopy
@@ -59,13 +59,13 @@ def gbh_source(root, rgb_subdir: str = "rgb", height_subdir: str = "ndsm",
     product (GBA.Height, heights only) is public (mediaTUM), and HF has only
     polygons/LoD1. So GBH cannot feed our RGB->height task; use Open-Canopy instead.
     This adapter remains only for anyone who separately holds licensed paired
-    rasters. See upgrade/DATASET_LICENSES.md.
+    rasters. See upgrade/docs/DATASET_LICENSES.md.
 
 
     Data (GBA.Height) is on mediaTUM (NOT HuggingFace); the code repo
     (github.com/zhu-xlab/GlobalBuildingAtlas) is code only. License is CONFIRMED
     CC BY-NC 4.0 — "you may not use the material for commercial purposes" — with
-    attribution + citation required (see upgrade/DATASET_LICENSES.md). Use ONLY if
+    attribution + citation required (see upgrade/docs/DATASET_LICENSES.md). Use ONLY if
     the whole deliverable is non-commercial; a model trained on NC data may inherit
     the restriction (contested). Otherwise blend Open-Canopy alone (omit gbh_root).
     Adjust subdirs to the real mediaTUM layout."""

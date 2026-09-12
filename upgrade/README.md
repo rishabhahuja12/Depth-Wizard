@@ -36,12 +36,16 @@ reversible action — not something that leaks in as a side effect of building.
 
 ```
 upgrade/
-├── README.md            ← this file
-├── .gitignore           ← ignores heavy local artifacts (checkpoints, data, reports)
+├── README.md            ← this file (overview + status)
+├── SETUP.md             ← the workstation run guide
+├── .gitignore           ← ignores heavy local artifacts (checkpoints, data, logs)
+├── logging_config.py    ← shared structured/timestamped logging
+├── docs/                ← reference docs: datasets guide, licences, integrations, workstation
 ├── evaluation/          ← P0: baseline harness + metrics + before/after tables
 ├── training/            ← P1: metric losses/dataset/loop, adapters, harmonize, prefetch
 ├── inference/           ← P1b DEM base · P2 tiling · P4 off-nadir detect
-├── outputs/             ← generated reports, metric CSVs, experiment logs   (git-ignored)
+├── logs/                ← per-run training logs                             (git-ignored)
+├── outputs/             ← generated reports, metric CSVs                    (git-ignored)
 ├── checkpoints/         ← trained model weights                             (git-ignored)
 └── data/                ← prefetched GAMUS cache + manifests                (git-ignored)
 ```
@@ -59,13 +63,13 @@ Source of truth: `research/MODEL_PERFORMANCE_MASTER_PLAN.md` (+ `DEPTH_MODEL_RES
 | **P1 Stage 1** | Un-normalized metric losses + meters dataset + ViT-Large training loop | ✅ built & tested; smoke-verified; **train runs on workstation** |
 | **P1 Stage 2/3** | Sobel edge + HTC long-tail losses (weight-gated) | ✅ **built & tested**; execution gated on Stage 1 beating baseline |
 | **P1 adapters** | LoRA/DoRA (fallback / Giant-enabler) | ✅ **built & tested** |
-| **P1 blend** | Open-Canopy source + `--blend` wired; shared reader hardened for more aux sources | ✅ **built, wired & CPU-integration-tested**; run after GAMUS-only works. Adopted flow: **GAMUS → +Open-Canopy (forest) → +M4Heights (urban, easy) → +DFC2023 (global diversity) → NL pair-builder (quality ceiling, if needed)**. GBH dropped (paired RGB not public); US3D/GeoNRW on hold/fallback. Full rationale in `DATASETS_GUIDE.md`; licences in `DATASET_LICENSES.md` |
+| **P1 blend** | Open-Canopy source + `--blend` wired; shared reader hardened for more aux sources | ✅ **built, wired & CPU-integration-tested**; run after GAMUS-only works. Adopted flow: **GAMUS → +Open-Canopy (forest) → +M4Heights (urban, easy) → +DFC2023 (global diversity) → NL pair-builder (quality ceiling, if needed)**. GBH dropped (paired RGB not public); US3D/GeoNRW on hold/fallback. Full rationale in `docs/DATASETS_GUIDE.md`; licences in `docs/DATASET_LICENSES.md` |
 | **P1b** | Absolute DSM = real DEM base + nDSM (flood-critical) | ✅ **built & tested** (compose + DEM upsample; offline DEM adapter) |
 | **P2** | Tile-based hi-res inference (Export path; Live stays single-pass) | ✅ **built & tested** (seamless stitch) |
 | **P4** | Off-nadir detect + flag (anisotropy cue; never correct/synthesize) | ✅ **built & tested** |
 | **P1b** | Real DEM base terrain (Copernicus/SRTM + CartoDEM for India) | not started |
 | **P2** | Detail/tiling (Live vs Export) | not started |
-| **P3a** | Triplanar texturing | ❌ tried & reverted — wrong lever (see INTEGRATIONS.md) |
+| **P3a** | Triplanar texturing | ❌ tried & reverted — wrong lever (see docs/INTEGRATIONS.md) |
 | **P3 (mesh)** | Melted-tent fix | **deferred post-P1**; voxel mode is the primary renderer; skirts (P3b) revisited after P1 sharpens edges |
 | **P4** | Off-nadir = **detect + flag only** (stated limitation; no v2) | not started |
 | **P5** | Super-resolution | likely skipped |
@@ -77,7 +81,7 @@ Source of truth: `research/MODEL_PERFORMANCE_MASTER_PLAN.md` (+ `DEPTH_MODEL_RES
   +DFC2023 (global diversity) → NL pair-builder (0.5 m LiDAR quality, if needed)**, each
   harmonized to a common ground resolution and each gated on beating val MAE. GBH dropped
   (paired RGB not public); US3D/DFC2019 + GeoNRW on hold as fallbacks. Plain-English
-  rationale in `DATASETS_GUIDE.md`.
+  rationale in `docs/DATASETS_GUIDE.md`.
 - **Off-nadir:** detect + flag only. No v2 (instance building-reconstruction) — data-limited
   and out of scope for this effort.
 

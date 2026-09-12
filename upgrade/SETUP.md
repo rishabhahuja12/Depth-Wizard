@@ -4,7 +4,7 @@ Self-contained guide for the training workstation (RTX 4500 Ada, 24 GB). Tuned t
 run **gently over the weekend**: **low learning rate**, **GPU kept under ~50%**
 (both memory and utilization), trading speed for a cool, half-idle card.
 
-> This supersedes the training section of `WORKSTATION_SETUP.md`; the env steps
+> This supersedes the training section of `docs/WORKSTATION_SETUP.md`; the env steps
 > below are the same, the run config is the gentle one.
 
 ---
@@ -178,8 +178,8 @@ step must beat the previous on val MAE (or its own metric) before the next.
 ```
 
 **Dataset blend (building-height aux)** — only after GAMUS-only wins. **Adopted flow,
-gated one source at a time on val MAE** (plain-English rationale in `DATASETS_GUIDE.md`,
-licences in `DATASET_LICENSES.md`):
+gated one source at a time on val MAE** (plain-English rationale in `docs/DATASETS_GUIDE.md`,
+licences in `docs/DATASET_LICENSES.md`):
 
   GAMUS → **+Open-Canopy** (forest) → **+M4Heights** (urban, HF-easy) → **+DFC2023**
   (global diversity: sparse/hilly/non-Western) → **NL pair-builder** (0.5 m LiDAR
@@ -205,7 +205,7 @@ until a DTM is sourced. GBH stays **dropped** (paired RGB not public).
      publicly available** — the imagery is PLANET PlanetScope (proprietary); only the
      derived global height product (GBA.Height, heights only) is public. So it can't
      feed our RGB→height task. **Blend Open-Canopy alone (omit `--gbh-root`).** Details
-     in `upgrade\DATASET_LICENSES.md`.
+     in `upgrade\docs\DATASET_LICENSES.md`.
 2. **Confirm the real folder names** and pass them as subdirs (defaults may differ
    from the actual download): the sources take `rgb_subdir` / `height_subdir`.
 3. Train blended (after Stage 1+ on GAMUS):
@@ -231,7 +231,7 @@ training. All tested, in `upgrade\inference\`:
 - `off_nadir.py` — obliqueness flag ("⚠ oblique — reduced accuracy").
 
 These integrate into the live app as a **separate, deliberate step** (logged in
-`upgrade\INTEGRATIONS.md`) once a metric checkpoint has passed the gate.
+`upgrade\docs\INTEGRATIONS.md`) once a metric checkpoint has passed the gate.
 
 ---
 
