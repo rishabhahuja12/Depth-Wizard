@@ -103,7 +103,7 @@ so you can literally unplug the network:
 .venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume `
   --epochs 50 --warmup 3 `
   --enc-lr 2.5e-6 --head-lr 2.5e-5 `
-  --batch 2 --grad-accum 8 --crop 512 `
+  --batch 2 --grad-accum 8 --crop 504 `
   --max-vram-frac 0.5 --throttle-sleep 0.15 `
   --workers 4 *>> upgrade\outputs\train_stage1.log
 ```
@@ -115,7 +115,7 @@ What each choice does:
 | `--enc-lr / --head-lr` | 2.5e-6 / 2.5e-5 | **Half the standard low LRs** — gentle, steady; we have time |
 | `--epochs / --warmup` | 50 / 3 | Low LR needs more epochs; longer warmup = softer start |
 | `--batch / --grad-accum` | 2 / 8 | eff. batch 16 but tiny VRAM footprint |
-| `--crop` | 512 | deterministic 512 tile-cells (4 per 1024 tile), zero augmentation |
+| `--crop` | 504 | deterministic tile-cells (4 per 1024 tile), zero augmentation; **504 = 36×14, a multiple of the DINOv2 patch** so there's no patch-boundary interpolation (512 isn't). 448 (32×14) is the clean OOM fallback |
 | `--max-vram-frac` | 0.5 | hard cap → process can't exceed ~12 GB |
 | `--throttle-sleep` | 0.15 | idles each step → holds average GPU utilization down |
 
@@ -133,7 +133,7 @@ Needs `pip install peft`. Frees VRAM, trains faster, slight ceiling cost — use
 if full-FT stalls or you want to A/B the Giant backbone:
 ```powershell
 .venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume --lora `
-  --lora-r 16 --lora-alpha 32 --epochs 50 --crop 512 `
+  --lora-r 16 --lora-alpha 32 --epochs 50 --crop 504 `
   --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_lora.log
 ```
 
@@ -168,13 +168,13 @@ step must beat the previous on val MAE (or its own metric) before the next.
 ```powershell
 .venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume `
   --w-silog 1.0 --w-l1 1.0 --w-grad 0.5 `
-  --epochs 60 --crop 512 --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_stage2.log
+  --epochs 60 --crop 504 --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_stage2.log
 ```
 **Stage 3 — add long-tail (tall-structure) reweighting** (only if Stage 2 helped):
 ```powershell
 .venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume `
   --w-silog 1.0 --w-l1 1.0 --w-grad 0.5 --w-lt 0.5 `
-  --epochs 60 --crop 512 --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_stage3.log
+  --epochs 60 --crop 504 --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_stage3.log
 ```
 
 **Dataset blend (building-height aux)** — only after GAMUS-only wins. **Adopted flow,
@@ -212,7 +212,7 @@ until a DTM is sourced. GBH stays **dropped** (paired RGB not public).
    ```powershell
    .venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume --blend `
      --oc-root upgrade\data\open_canopy `
-     --aux-fraction 0.3 --aux-gsd 0.5 --crop 512 `
+     --aux-fraction 0.3 --aux-gsd 0.5 --crop 504 `
      --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_blend.log
    ```
    (GBH dropped — Open-Canopy is the sole aux source. `--gbh-root` remains available
@@ -234,6 +234,19 @@ These integrate into the live app as a **separate, deliberate step** (logged in
 `upgrade\INTEGRATIONS.md`) once a metric checkpoint has passed the gate.
 
 ---
+
+## Known limitations (from code review — not bugs, watch for them)
+- **Aux sampling is deterministic:** each epoch draws the *same* evenly-spaced tiles
+  (and the center cell of each), so a large aux source only ever shows a fixed
+  subset. Intentional (reproducible, zero-augmentation); raise `--aux-fraction` or
+  add sources for more coverage.
+- **Windows + HDF5 workers:** if `--workers 4` causes `PermissionError`/IO stutter on
+  the h5 tiles, drop to `--workers 2` or `0`.
+- **16-bit RGB is percentile-stretched per channel** (for viewability); colours may
+  shift slightly and it costs a little CPU per tile.
+- **Off-nadir flag** can false-positive on strong regular grids (Manhattan, farmland);
+  it's a warning, not a correction. **VRAM cap** (`--max-vram-frac 0.5`) hard-errors
+  on OOM rather than paging — drop `--crop`/`--batch` if it hits.
 
 ## Sanity: unit tests (CPU, no GPU) — all should pass before trusting a run
 ```powershell
