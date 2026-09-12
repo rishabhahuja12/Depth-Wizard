@@ -28,17 +28,40 @@ def calibrate_depth(
     is_georef: bool,
     gsd: float = None,
     target_range: float = 50.0,  # default assumed max building height in meters
+    is_metric: bool = False,     # model already outputs meters-above-ground (fine-tuned)
 ) -> CalibrationResult:
     """
-    Convert relative depth [0,1] to calibrated DSM.
+    Convert a model's depth prediction to a calibrated DSM.
 
-    For georeferenced: scale to approximate metric range using GSD and statistical prior.
-    For non-georeferenced: keep as relative [0,1].
+    - is_metric=True: the model was metric fine-tuned and ALREADY outputs
+      meters-above-ground (nDSM). Pass it through as meters — do NOT apply the
+      statistical alpha, or we'd double-scale a value that's already correct.
+    - is_metric=False (relative model): georef -> scale to an approximate metric
+      range via the GSD/statistical prior; non-georef -> keep relative [0,1].
     """
+    if is_metric:
+        return _metric_model_passthrough(relative_depth)
     if is_georef and gsd is not None:
         return _metric_calibration(relative_depth, gsd, target_range)
     else:
         return _relative_calibration(relative_depth)
+
+
+def _metric_model_passthrough(depth_meters: np.ndarray) -> CalibrationResult:
+    """Trust a metric fine-tuned model's output: it is already meters-above-ground.
+
+    Clean it (NaN/inf/neg -> 0) and return as-is. The absolute DTM base (real
+    ground elevation, e.g. from SRTM) is added elsewhere; here nDSM stands alone.
+    """
+    ndsm = np.maximum(np.nan_to_num(depth_meters.astype(np.float32),
+                                    nan=0.0, posinf=0.0, neginf=0.0), 0.0)
+    log.info("Metric model passthrough (no re-scaling)",
+             dsm_range=f"[{ndsm.min():.1f}, {ndsm.max():.1f}]m")
+    return CalibrationResult(
+        dsm=ndsm, alpha=1.0,
+        dsm_min=float(ndsm.min()), dsm_max=float(ndsm.max()), dsm_mean=float(ndsm.mean()),
+        mode="metric_model", unit="meters",
+    )
 
 
 def _metric_calibration(depth: np.ndarray, gsd: float, target_range: float) -> CalibrationResult:

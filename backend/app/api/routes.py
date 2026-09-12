@@ -55,11 +55,12 @@ def _process_pipeline(file_bytes: bytes, filename: str, request_id: str, estimat
     else:
         relative_depth = estimator.predict(pil_image)
 
-    # 3. Calibration
+    # 3. Calibration (a metric fine-tuned model already outputs meters — don't re-scale)
     cal_result = calibrate_depth(
         relative_depth,
         is_georef=metadata.is_georef,
         gsd=metadata.gsd,
+        is_metric=getattr(estimator, "is_metric", False),
     )
 
     # 4. Mesh generation

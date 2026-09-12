@@ -140,6 +140,23 @@ def test_calibration_dtm_and_gsd():
     assert cal_vhr.dsm_max - cal_vhr.dsm_min > 5.0
     print(f"  [PASS] DTM baseline and GSD scaling verified (VHR max={cal_vhr.dsm_max:.1f}m, Coarse max={cal_coarse.dsm_max:.1f}m)")
 
+def test_metric_model_passthrough():
+    print("Testing metric fine-tuned model calibration passthrough (G4)...")
+    from app.services.depth_estimator import postprocess_depth
+    # A metric model outputs meters-above-ground; calibration must NOT re-scale it.
+    metric_pred = np.array([[0.0, 12.5], [30.0, 3.0]], dtype=np.float32)
+    cal = calibrate_depth(metric_pred, is_georef=True, gsd=0.5, is_metric=True)
+    assert cal.unit == "meters" and cal.mode == "metric_model"
+    assert cal.alpha == 1.0, f"metric output re-scaled (alpha={cal.alpha})"
+    assert abs(cal.dsm_max - 30.0) < 1e-4, f"30m not preserved: {cal.dsm_max}"
+    # postprocess: metric keeps meters (+clip neg); relative squashes to [0,1].
+    raw = np.array([[-2.0, 25.0], [50.0, 0.0]], dtype=np.float32)
+    assert postprocess_depth(raw, is_metric=True).max() == 50.0
+    r = postprocess_depth(raw, is_metric=False)
+    assert 0.0 <= r.min() <= r.max() <= 1.0
+    print("  [PASS] metric output passes through as meters; relative -> [0,1]: PASSED")
+
+
 def test_cpu_autocast_guard():
     print("Testing PyTorch autocast CPU fallback guard...")
     import torch
@@ -296,6 +313,7 @@ if __name__ == "__main__":
     test_geospatial_fixes()
     test_validation_negative_and_nodata()
     test_calibration_dtm_and_gsd()
+    test_metric_model_passthrough()
     test_normal_map_and_shading()
     test_silog_batch_independence()
     test_full_pipeline()

@@ -13,6 +13,26 @@ from app.config import MODEL_ID, DEVICE, WEIGHTS_DIR
 from app.logging_config import log
 
 
+def postprocess_depth(depth: np.ndarray, is_metric: bool) -> np.ndarray:
+    """Turn a raw model prediction into the value we serve.
+
+    - is_metric: the model outputs meters-above-ground already — keep the SCALE,
+      only clean NaN/inf and clip negatives to ground. (Re-normalizing here is the
+      bug that silently threw away every metric fine-tune.)
+    - relative: robust percentile normalization to [0, 1] for a relative-depth model.
+    """
+    if is_metric:
+        return np.maximum(np.nan_to_num(depth.astype(np.float32),
+                                        nan=0.0, posinf=0.0, neginf=0.0), 0.0)
+    p_low, p_high = np.percentile(depth, [0.5, 99.5])
+    if p_high - p_low > 1e-6:
+        return np.clip((depth - p_low) / (p_high - p_low), 0.0, 1.0)
+    d_min, d_max = depth.min(), depth.max()
+    if d_max > d_min:
+        return (depth - d_min) / (d_max - d_min + 1e-8)
+    return np.zeros_like(depth)
+
+
 class DepthEstimator:
     def __init__(self):
         self.device = torch.device(DEVICE if torch.cuda.is_available() else "cpu")
@@ -26,18 +46,30 @@ class DepthEstimator:
             self.model = AutoModelForDepthEstimation.from_pretrained(MODEL_ID)
         self.model.to(self.device)
         self.model.eval()
+        self.is_metric = False  # set True when a metric fine-tuned checkpoint is loaded
 
-        # Try loading fine-tuned weights if they exist
-        finetuned_path = WEIGHTS_DIR / "best_model.pth"
-        if finetuned_path.exists():
+        # Try loading fine-tuned weights if they exist. Accept both the serving name
+        # (best_model.pth) and the training output name (metric_best.pth), so a
+        # metric checkpoint copied into weights/ is actually picked up.
+        finetuned_path = next((WEIGHTS_DIR / n for n in ("best_model.pth", "metric_best.pth")
+                               if (WEIGHTS_DIR / n).exists()), None)
+        if finetuned_path is not None:
             log.info("Loading fine-tuned weights", path=str(finetuned_path))
-            # Issue 8 fix: weights_only=True prevents arbitrary code execution
-            checkpoint = torch.load(finetuned_path, map_location=self.device, weights_only=False)
+            # Safe by default: weights_only=True blocks arbitrary code execution on
+            # load. Our checkpoints are plain tensors + primitives, so this works;
+            # fall back only for a legacy checkpoint the user placed themselves.
+            try:
+                checkpoint = torch.load(finetuned_path, map_location=self.device, weights_only=True)
+            except Exception as e:  # noqa: BLE001
+                log.warning("weights_only load failed; retrying unsafe load (trusted local file)",
+                            error=str(e))
+                checkpoint = torch.load(finetuned_path, map_location=self.device, weights_only=False)
             # Handle both new checkpoint dict format and legacy state_dict format
             if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
                 state_dict = checkpoint["model_state_dict"]
-                log.info("Loaded checkpoint from epoch", epoch=checkpoint.get("epoch", "?"),
-                         loss=checkpoint.get("loss", "?"))
+                self.is_metric = bool(checkpoint.get("metric", False))
+                log.info("Loaded checkpoint", epoch=checkpoint.get("epoch", "?"),
+                         val_mae_m=checkpoint.get("val_mae_m", "?"), metric=self.is_metric)
             else:
                 state_dict = checkpoint
 
@@ -45,8 +77,21 @@ class DepthEstimator:
             if has_nans:
                 log.error("Corrupted checkpoint detected with NaNs! Refusing to load.")
             else:
-                self.model.load_state_dict(state_dict, strict=False)
-                log.info("Fine-tuned weights loaded successfully")
+                # Loud key-match check: strict=False can silently load almost nothing
+                # if the checkpoint's architecture doesn't match (e.g. Large vs Small).
+                result = self.model.load_state_dict(state_dict, strict=False)
+                model_keys = set(self.model.state_dict().keys())
+                matched = len(model_keys) - len(set(result.missing_keys))
+                log.info("Fine-tuned weights loaded",
+                         matched=f"{matched}/{len(model_keys)}",
+                         missing=len(result.missing_keys), unexpected=len(result.unexpected_keys))
+                if matched == 0:
+                    self.is_metric = False
+                    log.error("Checkpoint matched ZERO model keys — wrong architecture? "
+                              "Serving the PRETRAINED model (metric flag cleared).")
+                elif matched < 0.5 * len(model_keys):
+                    log.error("Checkpoint matched <50% of model keys — likely an "
+                              "architecture mismatch; predictions may be unreliable.")
 
         log.info("DepthEstimator ready",
                  params=f"{sum(p.numel() for p in self.model.parameters()) / 1e6:.1f}M")
@@ -60,7 +105,8 @@ class DepthEstimator:
             rgb_image: PIL Image in RGB mode
 
         Returns:
-            depth: np.ndarray of shape (H, W), float32 in [0, 1]
+            depth: np.ndarray (H, W) float32 — meters-above-ground if a metric
+            checkpoint is loaded (self.is_metric), else relative depth in [0, 1].
         """
         if isinstance(rgb_image, np.ndarray):
             rgb_image = Image.fromarray(rgb_image)
@@ -90,15 +136,8 @@ class DepthEstimator:
 
         depth = prediction.cpu().numpy().astype(np.float32)
 
-        # Robust normalization against outlier artifacts (0.5th to 99.5th percentile)
-        p_low, p_high = np.percentile(depth, [0.5, 99.5])
-        if p_high - p_low > 1e-6:
-            depth = np.clip((depth - p_low) / (p_high - p_low), 0.0, 1.0)
-        else:
-            d_min, d_max = depth.min(), depth.max()
-            depth = (depth - d_min) / (d_max - d_min + 1e-8) if d_max > d_min else np.zeros_like(depth)
-
-        return depth
+        # Metric model -> keep meters; relative model -> normalize to [0,1].
+        return postprocess_depth(depth, self.is_metric)
 
     @torch.no_grad()
     def predict_with_confidence(self, rgb_image: Image.Image, n_passes: int = 5) -> tuple:
@@ -134,13 +173,8 @@ class DepthEstimator:
         mean_depth = stacked.mean(dim=0).cpu().numpy().astype(np.float32)
         variance = stacked.var(dim=0).cpu().numpy().astype(np.float32)
 
-        # Robust normalization for mean depth
-        p_low, p_high = np.percentile(mean_depth, [0.5, 99.5])
-        if p_high - p_low > 1e-6:
-            mean_depth = np.clip((mean_depth - p_low) / (p_high - p_low), 0.0, 1.0)
-        else:
-            d_min, d_max = mean_depth.min(), mean_depth.max()
-            mean_depth = (mean_depth - d_min) / (d_max - d_min + 1e-8) if d_max > d_min else np.zeros_like(mean_depth)
+        # Metric model -> keep meters; relative model -> normalize to [0,1].
+        mean_depth = postprocess_depth(mean_depth, self.is_metric)
 
         # Confidence = 1 - normalized variance
         v_max = variance.max()
