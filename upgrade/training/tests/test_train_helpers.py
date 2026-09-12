@@ -52,6 +52,21 @@ def test_build_param_groups_splits_backbone_and_head():
     assert len(by_lr[5e-5]) == 2, "head group should hold the 2 head params"
 
 
+def test_build_param_groups_routes_lora_to_own_lr():
+    class DummyLoRA(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.backbone = nn.Linear(2, 2)                       # base backbone (2 params)
+            self.backbone_lora_A = nn.Parameter(torch.zeros(2, 2))  # adapter inside backbone
+            self.head = nn.Linear(2, 2)
+    m = DummyLoRA()
+    groups = tm.build_param_groups(m, enc_lr=5e-6, head_lr=5e-5, lora_lr=2e-4)
+    by_lr = {g["lr"]: g["params"] for g in groups}
+    assert 2e-4 in by_lr, "no LoRA group created at lora_lr"
+    assert len(by_lr[2e-4]) == 1, "LoRA param should be in its own group"
+    assert len(by_lr[5e-6]) == 2, "enc group should still hold only the 2 base backbone params"
+
+
 def test_parse_aux_weights_defaults_and_override():
     class S:
         def __init__(self, name): self.name = name

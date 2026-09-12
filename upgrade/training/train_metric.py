@@ -47,11 +47,19 @@ def lr_lambda(epoch: int, warmup_epochs: int, total_epochs: int) -> float:
     return 0.5 * (1.0 + math.cos(math.pi * progress))
 
 
-def build_param_groups(model, enc_lr: float, head_lr: float) -> list[dict]:
-    """Differential LR: encoder ('backbone' in name) slow, DPT head fast."""
-    enc = [p for n, p in model.named_parameters() if "backbone" in n and p.requires_grad]
-    head = [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]
-    return [{"params": enc, "lr": enc_lr}, {"params": head, "lr": head_lr}]
+def build_param_groups(model, enc_lr: float, head_lr: float, lora_lr: float | None = None) -> list[dict]:
+    """Differential LR: encoder ('backbone') slow, DPT head fast. LoRA adapters live
+    INSIDE backbone modules (so 'backbone' is in their name) but must NOT inherit the
+    tiny enc_lr — with B initialized to 0 they need ~1e-4 to move at all. Route any
+    'lora_' param to its own (higher) lora_lr group."""
+    named = list(model.named_parameters())
+    lora = [p for n, p in named if "lora_" in n and p.requires_grad]
+    enc = [p for n, p in named if "backbone" in n and "lora_" not in n and p.requires_grad]
+    head = [p for n, p in named if "backbone" not in n and "lora_" not in n and p.requires_grad]
+    groups = [{"params": enc, "lr": enc_lr}, {"params": head, "lr": head_lr}]
+    if lora:
+        groups.append({"params": lora, "lr": lora_lr if lora_lr is not None else head_lr})
+    return groups
 
 
 # --------------------------- model + prediction ---------------------------
@@ -114,12 +122,23 @@ def evaluate_mae(model, device, limit: int, crop: int, offline: bool, cache_dir)
         import gamus_eval_loader as loader
         src = loader.iter_eval_tiles("val", limit=limit)
 
+    import metric_dataset as md
     model.eval()
     errs = []
     for _tid, _city, rgb, agl in src:
-        x = _rgb_to_tensor(rgb, crop).to(device)
-        pred = predict_depth(model, x.unsqueeze(0), agl.shape).squeeze(0).float().cpu().numpy()
-        errs.append(metrics.mae(pred, agl))
+        # Evaluate on native-resolution crop cells (like training), NOT by squishing
+        # the whole 1024 tile down to `crop` — that halved the GSD and skewed val MAE.
+        cells = md.tile_grid(agl.shape[0], agl.shape[1], crop)
+        if not cells:                        # tile smaller than crop: fall back to resize
+            x = _rgb_to_tensor(rgb, crop).to(device)
+            pred = predict_depth(model, x.unsqueeze(0), agl.shape).squeeze(0).float().cpu().numpy()
+            errs.append(metrics.mae(pred, agl))
+            continue
+        for r0, c0 in cells:
+            rgb_c, agl_c = rgb[r0:r0 + crop, c0:c0 + crop], agl[r0:r0 + crop, c0:c0 + crop]
+            x = torch.from_numpy(md.normalize_rgb(rgb_c)).to(device)   # native res, no resize
+            pred = predict_depth(model, x.unsqueeze(0), agl_c.shape).squeeze(0).float().cpu().numpy()
+            errs.append(metrics.mae(pred, agl_c))
     model.train()
     errs = [e for e in errs if e == e]  # drop nan
     return float(np.mean(errs)) if errs else float("nan")
@@ -203,7 +222,9 @@ def train(args) -> int:
     print(f"Loss stage {stage}: silog={args.w_silog} l1={args.w_l1} "
           f"grad={args.w_grad} longtail={args.w_lt}")
     optim = torch.optim.AdamW(
-        build_param_groups(model, args.enc_lr, args.head_lr), weight_decay=0.01
+        build_param_groups(model, args.enc_lr, args.head_lr,
+                           lora_lr=getattr(args, "lora_lr", None) if args.lora else None),
+        weight_decay=0.01,
     )
     sched = torch.optim.lr_scheduler.LambdaLR(
         optim, lambda e: lr_lambda(e, args.warmup, args.epochs)
@@ -300,7 +321,18 @@ def train(args) -> int:
 
         if val_mae == val_mae and val_mae < best_mae:
             best_mae = val_mae
-            torch.save({"epoch": epoch + 1, "model_state_dict": model.state_dict(),
+            state = model.state_dict()
+            if args.lora:
+                # Serving loads a vanilla HF model — PEFT adapter keys won't match.
+                # Merge the adapters into the base weights for the saved checkpoint,
+                # then unmerge so training continues on the adapters.
+                try:
+                    model.merge_adapter()
+                    state = model.get_base_model().state_dict()
+                    model.unmerge_adapter()
+                except Exception as e:  # noqa: BLE001
+                    print(f"  LoRA merge for serving failed ({e}); saving adapter state as-is")
+            torch.save({"epoch": epoch + 1, "model_state_dict": state,
                         "val_mae_m": val_mae, "val_maes_by_landscape": maes,
                         "model_id": args.model, "metric": True},
                        ckpt_dir / "metric_best.pth")
@@ -344,7 +376,9 @@ def main() -> int:
     ap.add_argument("--epochs", type=int, default=35)
     ap.add_argument("--batch", type=int, default=2)
     ap.add_argument("--grad-accum", type=int, default=8, dest="grad_accum")  # eff. batch 16
-    ap.add_argument("--crop", type=int, default=512, help="deterministic tile-cell size")
+    ap.add_argument("--crop", type=int, default=504,
+                    help="deterministic tile-cell size — a multiple of 14 (DINOv2 patch); "
+                         "504=36x14 keeps 4 cells per 1024 tile with no patch-boundary interp")
     ap.add_argument("--augment", action="store_true",
                     help="opt-in flip/rotate aug (default OFF — zero-augmentation, raw tiles)")
     # Adapters (fallback / Giant-enabler; full FT is the primary path).
@@ -353,6 +387,8 @@ def main() -> int:
     ap.add_argument("--lora-r", type=int, default=16, dest="lora_r")
     ap.add_argument("--lora-alpha", type=int, default=32, dest="lora_alpha")
     ap.add_argument("--lora-dropout", type=float, default=0.05, dest="lora_dropout")
+    ap.add_argument("--lora-lr", type=float, default=2e-4, dest="lora_lr",
+                    help="LR for LoRA adapters (they need ~1e-4, not the tiny enc_lr)")
     ap.add_argument("--warmup", type=int, default=2)
     ap.add_argument("--enc-lr", type=float, default=5e-6, dest="enc_lr")
     ap.add_argument("--head-lr", type=float, default=5e-5, dest="head_lr")
