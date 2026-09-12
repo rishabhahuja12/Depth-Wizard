@@ -31,10 +31,11 @@ class SILogMetric(nn.Module):
     """Scale-invariant log loss: mean(d^2) - lambd * mean(d)^2, d = log(pred) - log(target).
     Evaluated only where target > eps (structure), so ground/nodata don't blow up log()."""
 
-    def __init__(self, lambd: float = 0.85, eps: float = 1e-3):
+    def __init__(self, lambd: float = 0.85, eps: float = 1e-3, alpha: float = 10.0):
         super().__init__()
         self.lambd = lambd
         self.eps = eps
+        self.alpha = alpha   # canonical scale (Eigen/DPT/DepthAnything use ~10)
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         mask = _finite_range_mask(target) & (target > self.eps) & torch.isfinite(pred)
@@ -43,8 +44,11 @@ class SILogMetric(nn.Module):
         p = pred[mask].clamp(min=self.eps)
         t = target[mask].clamp(min=self.eps)
         d = torch.log(p) - torch.log(t)
-        loss = torch.mean(d ** 2) - self.lambd * (torch.mean(d) ** 2)
-        return loss.clamp(min=0.0)
+        var = (torch.mean(d ** 2) - self.lambd * (torch.mean(d) ** 2)).clamp(min=0.0)
+        # Canonical scaled SILog (alpha * sqrt(var)). The bare variance was ~0.01-0.05
+        # — ~100x smaller than the meters-scale Smooth-L1, so its gradient was drowned
+        # out. sqrt + alpha brings it to O(1) so both terms actually contribute.
+        return torch.sqrt(var) * self.alpha
 
 
 class SmoothL1Metric(nn.Module):
@@ -81,12 +85,21 @@ class EdgeGradientLoss(nn.Module):
         return x
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        p = torch.nan_to_num(self._to_bchw(pred).float())
-        t = torch.nan_to_num(self._to_bchw(target).float())
+        p = self._to_bchw(pred).float()
+        t = self._to_bchw(target).float()
+        # Mask invalid/nodata pixels to 0 so an uncaught sentinel can't create a
+        # huge fake Sobel cliff (they'd otherwise pass nan_to_num untouched).
+        valid = _finite_range_mask(t) & torch.isfinite(p)
+        p = torch.where(valid, p, torch.zeros_like(p))
+        t = torch.where(valid, t, torch.zeros_like(t))
         sx, sy = self.sx.to(p.dtype), self.sy.to(p.dtype)
         pdx, pdy = F.conv2d(p, sx, padding=1), F.conv2d(p, sy, padding=1)
         tdx, tdy = F.conv2d(t, sx, padding=1), F.conv2d(t, sy, padding=1)
-        return (pdx - tdx).abs().mean() + (pdy - tdy).abs().mean()
+        dx, dy = (pdx - tdx).abs(), (pdy - tdy).abs()
+        # Strip the 1px border where zero-padding fabricates edges.
+        if dx.shape[-1] > 2 and dx.shape[-2] > 2:
+            dx, dy = dx[..., 1:-1, 1:-1], dy[..., 1:-1, 1:-1]
+        return dx.mean() + dy.mean()
 
 
 class LongTailWeightedL1(nn.Module):

@@ -31,13 +31,15 @@ def test_silog_zero_on_perfect_prediction():
 
 
 def test_silog_pure_scale_gives_lambda_residual():
-    # d = ln(2) constant -> mean(d^2) - lambd*mean(d)^2 = (1 - lambd) * ln(2)^2
-    lambd = 0.85
+    # d = ln(2) constant -> var = mean(d^2) - lambd*mean(d)^2 = (1 - lambd)*ln(2)^2;
+    # canonical scaled SILog returns alpha * sqrt(var).
+    lambd, alpha = 0.85, 10.0
     t = torch.tensor([[1.0, 2.0, 3.0, 4.0, 8.0]])
     pred = t * 2.0
-    expected = (1.0 - lambd) * (torch.log(torch.tensor(2.0)) ** 2).item()
-    loss = ml.SILogMetric(lambd=lambd)(pred, t)
-    _close(loss, expected, tol=1e-5, label="SILog pure-scale")
+    ln2 = torch.log(torch.tensor(2.0)).item()
+    expected = alpha * ((1.0 - lambd) * ln2 ** 2) ** 0.5
+    loss = ml.SILogMetric(lambd=lambd, alpha=alpha)(pred, t)
+    _close(loss, expected, tol=1e-5, label="SILog pure-scale (scaled)")
 
 
 def test_silog_ignores_ground_and_nodata_pixels():
@@ -92,6 +94,17 @@ def test_edge_loss_positive_when_edge_missing():
     t[:, :, 4:] = 10.0          # target has an edge
     pred = torch.zeros(1, 8, 8)  # prediction is flat -> misses the edge
     assert ml.EdgeGradientLoss()(pred, t) > 0.1, "edge loss should penalize a missing edge"
+
+
+def test_edge_loss_ignores_nodata_sentinel():
+    # An uncaught nodata sentinel must NOT create a giant Sobel cliff.
+    t = torch.zeros(1, 8, 8)
+    t[:, :, 4:] = 10.0
+    t[:, 0, 0] = 32767.0                 # sentinel in a corner (border, also masked)
+    t[:, 3, 3] = 32767.0                 # sentinel in the interior
+    pred = t.clone(); pred[:, 3, 3] = 10.0
+    loss = ml.EdgeGradientLoss()(pred, t)
+    assert torch.isfinite(loss) and loss < 100.0, f"sentinel produced a huge edge loss: {loss}"
 
 
 # --- Stage 3: long-tail (tall-structure) reweighting ---
