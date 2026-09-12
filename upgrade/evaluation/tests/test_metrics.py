@@ -106,6 +106,16 @@ def test_boundary_f_zero_when_prediction_is_flat():
     _assert_close(f, 0.0, tol=1e-6, label="boundary-F flat prediction")
 
 
+def test_boundary_f_tolerates_small_edge_shift():
+    # A 2px-shifted edge should score high with tolerance, ~0 without it.
+    ref = np.zeros((16, 16), dtype=np.float32); ref[:, 8:] = 10.0   # edge at col 8
+    pred = np.zeros((16, 16), dtype=np.float32); pred[:, 10:] = 10.0  # edge at col 10
+    f_tol = metrics.boundary_f_score(pred, ref, edge_threshold=1.0, tol=2)
+    f_exact = metrics.boundary_f_score(pred, ref, edge_threshold=1.0, tol=0)
+    assert f_tol > 0.9, f"2px-shifted edge should match within tol=2, got {f_tol}"
+    assert f_exact < 0.1, f"exact match should collapse on a 2px shift, got {f_exact}"
+
+
 def test_tall_structure_mae_only_counts_tall_pixels():
     # ref > 15 only at the last two pixels; error there is [2, 4] -> MAE 3.
     # The short-pixel errors (huge) must be ignored.

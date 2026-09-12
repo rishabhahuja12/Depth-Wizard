@@ -118,9 +118,13 @@ def _edge_map(arr: np.ndarray, edge_threshold: float) -> np.ndarray:
     return mag > edge_threshold
 
 
-def boundary_f_score(pred: np.ndarray, ref: np.ndarray, edge_threshold: float) -> float:
-    """F1 between predicted and reference depth-discontinuity maps.
-    1.0 = edges match exactly; 0.0 = no overlap (e.g. a flat prediction)."""
+def boundary_f_score(pred: np.ndarray, ref: np.ndarray, edge_threshold: float,
+                     tol: int = 2) -> float:
+    """F1 between predicted and reference depth-discontinuity maps, with a `tol`-pixel
+    matching tolerance (BSDS-style). A predicted edge counts if it's within `tol`
+    pixels of a reference edge (and vice versa). Without tolerance a 1-2 px offset —
+    normal for a neural edge vs a LiDAR raster — collapses the score to 0, which is
+    why exact-match Boundary-F read near-zero on the P0 baseline. tol=0 = exact."""
     pe = _edge_map(pred, edge_threshold)
     re = _edge_map(ref, edge_threshold)
     p_sum, r_sum = int(pe.sum()), int(re.sum())
@@ -128,13 +132,18 @@ def boundary_f_score(pred: np.ndarray, ref: np.ndarray, edge_threshold: float) -
         return 1.0
     if p_sum == 0 or r_sum == 0:
         return 0.0
-    tp = int(np.sum(pe & re))
-    fp = p_sum - tp
-    fn = r_sum - tp
-    if tp == 0:
+    if tol > 0:
+        from scipy.ndimage import binary_dilation
+        st = np.ones((2 * tol + 1, 2 * tol + 1), dtype=bool)
+        pe_d, re_d = binary_dilation(pe, st), binary_dilation(re, st)
+    else:
+        pe_d, re_d = pe, re
+    tp_p = int(np.sum(pe & re_d))   # predicted edges near a ref edge -> precision
+    tp_r = int(np.sum(re & pe_d))   # ref edges near a predicted edge -> recall
+    if tp_p == 0 or tp_r == 0:
         return 0.0
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
+    precision = tp_p / p_sum
+    recall = tp_r / r_sum
     return float(2 * precision * recall / (precision + recall))
 
 
