@@ -50,15 +50,22 @@ def absolute_from_ndsm(ndsm: np.ndarray, dem_coarse: np.ndarray | None) -> np.nd
 
 # --------------------------- DEM fetch adapter (offline-first) ---------------------------
 
-def load_local_dem(dem_path, bounds: dict | None = None) -> np.ndarray:
-    """Read a bundled/cached DEM GeoTIFF (optionally windowed to `bounds` in the
-    DEM's CRS). Bundle a DEM for demo AOIs so the jury run never hits the network."""
+def load_local_dem(dem_path, bounds: dict | None = None, bounds_crs: str | None = None) -> np.ndarray:
+    """Read a bundled/cached DEM GeoTIFF, optionally windowed to `bounds`.
+
+    `bounds` may be in a different CRS than the DEM (e.g. image in WGS84 degrees, DEM
+    in UTM meters). If `bounds_crs` differs from the DEM's CRS, the bounds are
+    reprojected first — otherwise from_bounds would compute a wrong (or empty) window."""
     import rasterio
     from rasterio.windows import from_bounds
+    from rasterio.warp import transform_bounds
     with rasterio.open(dem_path) as ds:
         if bounds:
-            win = from_bounds(bounds["left"], bounds["bottom"],
-                              bounds["right"], bounds["top"], ds.transform)
+            left, bottom, right, top = bounds["left"], bounds["bottom"], bounds["right"], bounds["top"]
+            if bounds_crs and ds.crs and str(bounds_crs) != str(ds.crs):
+                left, bottom, right, top = transform_bounds(bounds_crs, ds.crs,
+                                                            left, bottom, right, top)
+            win = from_bounds(left, bottom, right, top, ds.transform)
             return ds.read(1, window=win).astype(np.float32)
         return ds.read(1).astype(np.float32)
 
@@ -68,11 +75,12 @@ def dem_for_tile(bounds: dict, crs: str, cache_dir: Path | None = None,
     """Return a coarse DEM for a georeferenced tile, offline-first:
       1. a bundled DEM covering the AOI (preferred — offline, jury-safe), else
       2. None (caller falls back to flat base).
+    `crs` is the CRS of `bounds`, reprojected to the DEM's CRS as needed.
     A live Copernicus/SRTM fetch can be added here, but is intentionally NOT the
     default so demo runs never depend on the network."""
     if bundled_dem and Path(bundled_dem).exists():
         try:
-            return load_local_dem(bundled_dem, bounds)
+            return load_local_dem(bundled_dem, bounds, bounds_crs=crs)
         except Exception:  # noqa: BLE001
             return None
     return None

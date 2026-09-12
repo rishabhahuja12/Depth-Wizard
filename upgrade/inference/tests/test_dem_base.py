@@ -50,6 +50,29 @@ def test_flat_base_used_when_no_dem():
     assert np.allclose(out, ndsm)             # equals nDSM (base = 0)
 
 
+def test_load_local_dem_reprojects_bounds_across_crs():
+    # DEM in UTM (meters); query bounds in WGS84 (degrees). Without reprojection the
+    # window is wrong/empty; with it we read the intended sub-region.
+    import tempfile, rasterio
+    from rasterio.transform import from_origin
+    from rasterio.warp import transform_bounds
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "utm_dem.tif"
+        data = np.arange(100 * 100, dtype=np.float32).reshape(100, 100)
+        transform = from_origin(500000, 3000000, 10, 10)   # UTM 43N, 10 m pixels
+        with rasterio.open(path, "w", driver="GTiff", height=100, width=100, count=1,
+                           dtype="float32", crs="EPSG:32643", transform=transform) as ds:
+            ds.write(data, 1)
+        # a 50x50 m sub-window in UTM, expressed in WGS84 degrees
+        utm = {"left": 500100, "bottom": 2999500, "right": 500600, "top": 3000000}
+        lon0, lat0, lon1, lat1 = transform_bounds("EPSG:32643", "EPSG:4326",
+                                                  utm["left"], utm["bottom"], utm["right"], utm["top"])
+        wgs = {"left": lon0, "bottom": lat0, "right": lon1, "top": lat1}
+        arr = dem.load_local_dem(path, wgs, bounds_crs="EPSG:4326")
+        assert arr.size > 0, "reprojected window came back empty"
+        assert 40 <= arr.shape[0] <= 60 and 40 <= arr.shape[1] <= 60, f"unexpected window {arr.shape}"
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
