@@ -52,6 +52,20 @@ def test_build_param_groups_splits_backbone_and_head():
     assert len(by_lr[5e-5]) == 2, "head group should hold the 2 head params"
 
 
+def test_parse_aux_weights_defaults_and_override():
+    class S:
+        def __init__(self, name): self.name = name
+    sources = [S("open_canopy"), S("dfc2023")]
+    # default: every source weighted 1.0
+    assert tm.parse_aux_weights(None, sources) == {"open_canopy": 1.0, "dfc2023": 1.0}
+    # override: down-weight the noisy source, leave the other at default
+    w = tm.parse_aux_weights("dfc2023=0.5", sources)
+    assert w == {"open_canopy": 1.0, "dfc2023": 0.5}
+    # unknown names ignored; bad values ignored (stay default)
+    w2 = tm.parse_aux_weights("nope=2.0,dfc2023=oops", sources)
+    assert w2 == {"open_canopy": 1.0, "dfc2023": 1.0}
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

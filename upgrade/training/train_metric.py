@@ -125,6 +125,29 @@ def evaluate_mae(model, device, limit: int, crop: int, offline: bool, cache_dir)
     return float(np.mean(errs)) if errs else float("nan")
 
 
+@torch.no_grad()
+def evaluate_aux_mae(model, device, val_source, aux_gsd: float, crop: int, limit: int) -> float:
+    """Metric MAE on a held-out aux source (G2), harmonized exactly like training
+    (same resample-to-GSD + crop). Lets the gate measure the landscape this source
+    adds (e.g. forests via Open-Canopy), which a GAMUS-urban val set can't see."""
+    import numpy as np
+    import metrics
+    import multi_dataset as mdm
+
+    total = min(len(val_source), limit) if limit else len(val_source)
+    ds = mdm.MixedMetricDataset([val_source], {val_source.name: 1.0},
+                                target_gsd=aux_gsd, crop=crop, total_per_epoch=total)
+    model.eval()
+    errs = []
+    for k in range(len(ds)):
+        rgb_t, depth_t = ds[k]
+        pred = predict_depth(model, rgb_t.unsqueeze(0).to(device), depth_t.shape)
+        errs.append(metrics.mae(pred.squeeze(0).float().cpu().numpy(), depth_t.numpy()))
+    model.train()
+    errs = [e for e in errs if e == e]
+    return float(np.mean(errs)) if errs else float("nan")
+
+
 def _rgb_to_tensor(rgb, crop: int):
     import metric_dataset as md
     from PIL import Image
@@ -134,6 +157,24 @@ def _rgb_to_tensor(rgb, crop: int):
 
 
 # --------------------------- training ---------------------------
+
+def parse_aux_weights(spec, sources) -> dict:
+    """Per-source blend weights from a 'name=w,name2=w2' string; default 1.0 each.
+    Lets a noisy source (e.g. `dfc2023=0.5`) get a smaller vote than a clean one,
+    instead of every source counting equally (G1)."""
+    weights = {s.name: 1.0 for s in sources}
+    if spec:
+        for part in str(spec).split(","):
+            if "=" in part:
+                name, val = part.split("=", 1)
+                name = name.strip()
+                if name in weights:
+                    try:
+                        weights[name] = max(0.0, float(val))
+                    except ValueError:
+                        print(f"  (ignored bad --aux-weights entry: {part!r})")
+    return weights
+
 
 def train(args) -> int:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -176,25 +217,30 @@ def train(args) -> int:
     # Optional dataset blend: GAMUS (native tiling) + harmonized aux sources
     # (Open-Canopy / GBH) mixed in at a controlled fraction. Only after GAMUS-only
     # beats the baseline (research §2.8 sequencing).
+    aux_val_sources = []                          # G2: held-out aux val (per-landscape)
     if args.blend:
         import aux_datasets
+        import multi_dataset
         from torch.utils.data import ConcatDataset
-        aux_sources = aux_datasets.build_aux_sources(oc_root=args.oc_root, gbh_root=args.gbh_root)
+        aux_sources = aux_datasets.build_aux_sources(
+            oc_root=args.oc_root, gbh_root=args.gbh_root,
+            geonrw_root=getattr(args, "geonrw_root", None),   # tolerate hand-built args
+            m4h_root=getattr(args, "m4h_root", None),
+            dfc_root=getattr(args, "dfc_root", None),
+            us3d_root=getattr(args, "us3d_root", None))
         if aux_sources:
+            # G2: hold out a slice of each aux source so the gate can measure the
+            # landscape it adds (forest/diversity), not just GAMUS-urban val.
+            aux_sources, aux_val_sources = aux_datasets.split_aux_train_val(aux_sources, val_every=10)
             gamus_len = len(dataset)
             aux_total = max(1, round(args.aux_fraction * gamus_len))
-            weights = {s.name: 1.0 for s in aux_sources}
-            aux_mix = md.MixedMetricDataset(aux_sources, weights, target_gsd=args.aux_gsd,
-                                            crop=args.crop, total_per_epoch=aux_total) \
-                if hasattr(md, "MixedMetricDataset") else None
-            if aux_mix is None:
-                import multi_dataset
-                aux_mix = multi_dataset.MixedMetricDataset(aux_sources, weights,
-                                                           target_gsd=args.aux_gsd, crop=args.crop,
-                                                           total_per_epoch=aux_total)
+            weights = parse_aux_weights(getattr(args, "aux_weights", None), aux_sources)
+            aux_mix = multi_dataset.MixedMetricDataset(aux_sources, weights, target_gsd=args.aux_gsd,
+                                                       crop=args.crop, total_per_epoch=aux_total)
             dataset = ConcatDataset([dataset, aux_mix])
             print(f"Blend: GAMUS {gamus_len} + aux {len(aux_mix)} "
-                  f"({[s.name for s in aux_sources]}) = {len(dataset)}")
+                  f"(train {[(s.name, len(s)) for s in aux_sources]}, "
+                  f"val {[(s.name, len(s)) for s in aux_val_sources]}); weights={weights}")
         else:
             print("Blend requested but no aux sources found — training on GAMUS only.")
 
@@ -237,16 +283,26 @@ def train(args) -> int:
                 time.sleep(args.throttle_sleep)
 
         sched.step()
-        val_mae = evaluate_mae(model, device, limit=args.val_tiles, crop=args.crop,
-                               offline=args.offline, cache_dir=args.cache_dir)
+        # G2: validate on GAMUS (urban) AND each held-out aux landscape, then gate
+        # on the MEAN — so a blend that improves forests/diversity isn't rejected
+        # just because GAMUS-urban MAE was flat.
+        maes = {"gamus": evaluate_mae(model, device, limit=args.val_tiles, crop=args.crop,
+                                      offline=args.offline, cache_dir=args.cache_dir)}
+        for vs in aux_val_sources:
+            maes[vs.name] = evaluate_aux_mae(model, device, vs, args.aux_gsd, args.crop,
+                                             limit=args.val_tiles)
+        finite = [v for v in maes.values() if v == v]
+        val_mae = sum(finite) / len(finite) if finite else float("nan")  # landscape mean
         dt = (time.time() - t0) / 60
+        per = " ".join(f"{k}={v:.2f}" for k, v in maes.items())
         print(f"[epoch {epoch+1}/{args.epochs}] train_loss={running/max(len(loader),1):.4f} "
-              f"val_MAE={val_mae:.3f} m  ({dt:.1f} min)")
+              f"val mean MAE={val_mae:.3f} m  [{per}]  ({dt:.1f} min)")
 
         if val_mae == val_mae and val_mae < best_mae:
             best_mae = val_mae
             torch.save({"epoch": epoch + 1, "model_state_dict": model.state_dict(),
-                        "val_mae_m": val_mae, "model_id": args.model, "metric": True},
+                        "val_mae_m": val_mae, "val_maes_by_landscape": maes,
+                        "model_id": args.model, "metric": True},
                        ckpt_dir / "metric_best.pth")
             print(f"  -> saved metric_best.pth (val MAE {val_mae:.3f} m)")
 
@@ -321,8 +377,19 @@ def main() -> int:
     ap.add_argument("--blend", action="store_true", help="mix Open-Canopy/GBH into GAMUS")
     ap.add_argument("--oc-root", default=None, dest="oc_root", help="Open-Canopy download root")
     ap.add_argument("--gbh-root", default=None, dest="gbh_root", help="GBH download root")
+    ap.add_argument("--geonrw-root", default=None, dest="geonrw_root",
+                    help="GeoNRW root (ON HOLD; height_subdir must be DERIVED nDSM — see derive_ndsm)")
+    ap.add_argument("--m4h-root", default=None, dest="m4h_root",
+                    help="M4Heights root (extracted 1 m aerial rgb/ + height/ — see prefetch_m4heights)")
+    ap.add_argument("--dfc-root", default=None, dest="dfc_root",
+                    help="DFC2023 Track 2 root (train split; rgb/ + ndsm/)")
+    ap.add_argument("--us3d-root", default=None, dest="us3d_root",
+                    help="US3D/DFC2019 root (FALLBACK; images/ *_RGB.tif + truth/ *_AGL.tif)")
     ap.add_argument("--aux-fraction", type=float, default=0.3, dest="aux_fraction",
                     help="aux samples as a fraction of GAMUS length")
+    ap.add_argument("--aux-weights", default=None, dest="aux_weights",
+                    help="per-source blend weights, e.g. 'open_canopy=1.0,dfc2023=0.5' "
+                         "(down-weight a noisy source; default 1.0 each)")
     ap.add_argument("--aux-gsd", type=float, default=0.5, dest="aux_gsd",
                     help="common GSD (m) to harmonize aux sources to")
     ap.add_argument("--offline", action="store_true",
