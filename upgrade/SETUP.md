@@ -177,8 +177,22 @@ step must beat the previous on val MAE (or its own metric) before the next.
   --epochs 60 --crop 512 --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_stage3.log
 ```
 
-**Dataset blend (Open-Canopy + GBH)** — only after GAMUS-only wins. Now runnable
-via `--blend`.
+**Dataset blend (building-height aux)** — only after GAMUS-only wins. **Adopted flow,
+gated one source at a time on val MAE** (plain-English rationale in `DATASETS_GUIDE.md`,
+licences in `DATASET_LICENSES.md`):
+
+  GAMUS → **+Open-Canopy** (forest) → **+M4Heights** (urban, HF-easy) → **+DFC2023**
+  (global diversity: sparse/hilly/non-Western) → **NL pair-builder** (0.5 m LiDAR
+  quality ceiling, only if the easier adds plateau).
+
+All adapters + flags are now wired: `--oc-root` (prefetch wired), `--m4h-root`,
+`--dfc-root`, `--us3d-root`, `--geonrw-root`, plus `--aux-fraction` / `--aux-weights`.
+The shared reader handles each source's quirks (nodata/scale, `_RGB`↔`_AGL` names,
+multi-band imagery, recursive/nested pairing, DSM→nDSM). What remains per source is the
+**data download + confirming the real folder layout** (M4Heights: gated HF pull +
+unzip the aerial slice, see `prefetch_m4heights`; DFC2023: IEEE DataPort train split;
+US3D: fallback, needs a stem rule if a tile has many views). **GeoNRW** stays dormant
+until a DTM is sourced. GBH stays **dropped** (paired RGB not public).
 
 1. Get the data (large — grab slices):
    - **Open-Canopy** — *primary aux slice* (HF, GeoTIFF, 1.5 m, open license):

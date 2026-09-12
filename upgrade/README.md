@@ -59,7 +59,7 @@ Source of truth: `research/MODEL_PERFORMANCE_MASTER_PLAN.md` (+ `DEPTH_MODEL_RES
 | **P1 Stage 1** | Un-normalized metric losses + meters dataset + ViT-Large training loop | ✅ built & tested; smoke-verified; **train runs on workstation** |
 | **P1 Stage 2/3** | Sobel edge + HTC long-tail losses (weight-gated) | ✅ **built & tested**; execution gated on Stage 1 beating baseline |
 | **P1 adapters** | LoRA/DoRA (fallback / Giant-enabler) | ✅ **built & tested** |
-| **P1 blend** | Open-Canopy source + `--blend` wired into training | ✅ **built, wired & CPU-integration-tested**; run after GAMUS-only works. **GBH dropped** — paired RGB not public (PLANET proprietary); Open-Canopy is the sole aux slice (see DATASET_LICENSES.md) |
+| **P1 blend** | Open-Canopy source + `--blend` wired; shared reader hardened for more aux sources | ✅ **built, wired & CPU-integration-tested**; run after GAMUS-only works. Adopted flow: **GAMUS → +Open-Canopy (forest) → +M4Heights (urban, easy) → +DFC2023 (global diversity) → NL pair-builder (quality ceiling, if needed)**. GBH dropped (paired RGB not public); US3D/GeoNRW on hold/fallback. Full rationale in `DATASETS_GUIDE.md`; licences in `DATASET_LICENSES.md` |
 | **P1b** | Absolute DSM = real DEM base + nDSM (flood-critical) | ✅ **built & tested** (compose + DEM upsample; offline DEM adapter) |
 | **P2** | Tile-based hi-res inference (Export path; Live stays single-pass) | ✅ **built & tested** (seamless stitch) |
 | **P4** | Off-nadir detect + flag (anisotropy cue; never correct/synthesize) | ✅ **built & tested** |
@@ -73,8 +73,11 @@ Source of truth: `research/MODEL_PERFORMANCE_MASTER_PLAN.md` (+ `DEPTH_MODEL_RES
 ### Decisions locked in
 - **Hardware:** RTX 4500 Ada, 24 GB → full Large fine-tune is on the table.
 - **Goal:** genuine accuracy, no deadline → full plan, in order.
-- **Datasets:** GAMUS core → then blend a slice of Open-Canopy + all of GBH (harmonized to a
-  common ground resolution; GBH license still to verify).
+- **Datasets:** GAMUS core → gated blend **+Open-Canopy (forest) → +M4Heights (urban) →
+  +DFC2023 (global diversity) → NL pair-builder (0.5 m LiDAR quality, if needed)**, each
+  harmonized to a common ground resolution and each gated on beating val MAE. GBH dropped
+  (paired RGB not public); US3D/DFC2019 + GeoNRW on hold as fallbacks. Plain-English
+  rationale in `DATASETS_GUIDE.md`.
 - **Off-nadir:** detect + flag only. No v2 (instance building-reconstruction) — data-limited
   and out of scope for this effort.
 
