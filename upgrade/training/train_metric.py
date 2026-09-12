@@ -28,8 +28,10 @@ TRAIN_DIR = Path(__file__).resolve().parent
 UPGRADE_DIR = TRAIN_DIR.parent
 sys.path.insert(0, str(TRAIN_DIR))
 sys.path.insert(0, str(UPGRADE_DIR / "evaluation"))
+sys.path.insert(0, str(UPGRADE_DIR))
 
 import metric_losses as ml  # noqa: E402
+from logging_config import get_logger, log_kv  # noqa: E402
 
 LARGE_MODEL_ID = "depth-anything/Depth-Anything-V2-Large-hf"
 SMALL_MODEL_ID = "depth-anything/Depth-Anything-V2-Small-hf"
@@ -196,8 +198,14 @@ def parse_aux_weights(spec, sources) -> dict:
 
 
 def train(args) -> int:
+    log = get_logger("train_metric")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}  |  model: {args.model}")
+    log_kv(log, "run start", device=str(device), model=args.model, offline=args.offline,
+           epochs=args.epochs, warmup=args.warmup, batch=args.batch, grad_accum=args.grad_accum,
+           crop=args.crop, enc_lr=args.enc_lr, head_lr=args.head_lr, lora=args.lora,
+           blend=args.blend, aux_fraction=args.aux_fraction,
+           w_silog=args.w_silog, w_l1=args.w_l1, w_grad=args.w_grad, w_lt=args.w_lt,
+           max_vram_frac=args.max_vram_frac, throttle_sleep=args.throttle_sleep)
 
     # Resource ceiling: hard-cap the fraction of GPU memory this process may use,
     # so training stays under ~50% VRAM (leaves the card usable for other work).
@@ -316,8 +324,10 @@ def train(args) -> int:
         val_mae = sum(finite) / len(finite) if finite else float("nan")  # landscape mean
         dt = (time.time() - t0) / 60
         per = " ".join(f"{k}={v:.2f}" for k, v in maes.items())
-        print(f"[epoch {epoch+1}/{args.epochs}] train_loss={running/max(len(loader),1):.4f} "
-              f"val mean MAE={val_mae:.3f} m  [{per}]  ({dt:.1f} min)")
+        log_kv(log, f"epoch {epoch+1}/{args.epochs}",
+               train_loss=round(running / max(len(loader), 1), 4),
+               val_mean_mae=round(val_mae, 3), per_landscape=f"[{per}]",
+               lr=round(sched.get_last_lr()[0], 8), minutes=round(dt, 1))
 
         if val_mae == val_mae and val_mae < best_mae:
             best_mae = val_mae
@@ -336,12 +346,12 @@ def train(args) -> int:
                         "val_mae_m": val_mae, "val_maes_by_landscape": maes,
                         "model_id": args.model, "metric": True},
                        ckpt_dir / "metric_best.pth")
-            print(f"  -> saved metric_best.pth (val MAE {val_mae:.3f} m)")
+            log_kv(log, "saved metric_best.pth", val_mae=round(val_mae, 3), epoch=epoch + 1)
 
         # Always save full state so the run can resume after any interruption.
         save_ckpt(last_path, model, optim, sched, epoch + 1, best_mae)
 
-    print(f"Done. Best held-out MAE: {best_mae:.3f} m")
+    log_kv(log, "run done", best_val_mae=round(best_mae, 3), epochs=args.epochs)
     return 0
 
 
