@@ -50,6 +50,43 @@ def conform_meters_above_ground(height: np.ndarray) -> np.ndarray:
     return np.maximum(out, 0.0)
 
 
+def sanitize_height(height: np.ndarray, nodata: float | None = None,
+                    scale: float = 1.0, max_m: float = 1000.0) -> np.ndarray:
+    """Reader-side cleanup for a RAW height band, run BEFORE resample/conform.
+
+    New paired sources (US3D/DFC2019, DFC2023, M4Heights) carry things Open-Canopy
+    doesn't: nodata sentinels and non-meter units. Handle them at the source:
+      * nodata: the raster's declared nodata, matched on the RAW (pre-scale) value
+        and mapped to 0 (ground).
+      * scale: multiply to convert to meters (e.g. 0.1 for decimeters, 0.01 for cm).
+      * max_m: any post-scale value above this (or non-finite) is treated as
+        nodata -> 0. This catches UNDECLARED positive sentinels (e.g. 32767, 3.4e38)
+        that conform_meters_above_ground (negatives only) would otherwise pass
+        through as a giant fake structure and wreck the loss.
+    """
+    h = height.astype(np.float32)
+    if nodata is not None:
+        h = np.where(h == np.float32(nodata), np.float32(0.0), h)
+    if scale != 1.0:
+        h = h * np.float32(scale)
+    h = np.where(np.isfinite(h), h, np.float32(0.0))
+    h = np.where(h > np.float32(max_m), np.float32(0.0), h)
+    return h
+
+
+def ndsm_from_dsm_dtm(dsm: np.ndarray, dtm: np.ndarray) -> np.ndarray:
+    """nDSM (meters-above-ground) = DSM - DTM, floored at 0.
+
+    GeoNRW (and any LiDAR surface product) ships absolute elevation, NOT AGL —
+    feeding it straight in would train on height-above-sea-level. Subtract the
+    terrain model to recover above-ground height. Shapes must match."""
+    if dsm.shape != dtm.shape:
+        raise ValueError(f"DSM {dsm.shape} and DTM {dtm.shape} must match")
+    out = dsm.astype(np.float32) - dtm.astype(np.float32)
+    out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+    return np.maximum(out, np.float32(0.0))
+
+
 def balanced_source_plan(sizes: dict[str, int], weights: dict[str, float],
                          total: int) -> dict[str, int]:
     """How many samples to draw per source for one balanced 'epoch' of `total`

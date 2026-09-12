@@ -65,6 +65,28 @@ def test_resampling_changes_pixel_grid():
     assert abs(float(depth_t.max()) - 8.0) < 1e-3
 
 
+def test_cell_crop_preserves_scale_not_resize():
+    # G3: a tile larger than crop must be CROPPED to a cell at target_gsd, not
+    # squashed to crop (which silently undoes the GSD harmonization).
+    class Ramp:
+        name, gsd = "ramp", 0.5
+        def __len__(self):
+            return 1
+        def raw(self, i):
+            rows = (np.arange(128, dtype=np.float32)[:, None] * np.ones((1, 128), np.float32))
+            rgb = np.repeat(rows[..., None], 3, axis=-1).astype(np.uint8)
+            return rgb, rows                      # height = row index 0..127
+
+    ds = mds.MixedMetricDataset([Ramp()], weights={"ramp": 1.0},
+                                target_gsd=0.5, crop=32, total_per_epoch=1)  # factor 1: 128 -> 32 cell
+    _, depth_t = ds[0]
+    assert tuple(depth_t.shape) == (32, 32)
+    # center cell = rows ~48..79 -> mid-range values. A resize would keep the full
+    # 0..127 span, so this range check fails if the tile were squashed.
+    assert 40 < float(depth_t.min()) and float(depth_t.max()) < 100, \
+        f"tile resized (full span) not cell-cropped: [{float(depth_t.min())}, {float(depth_t.max())}]"
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

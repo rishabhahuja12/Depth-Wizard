@@ -42,6 +42,33 @@ def test_conform_meters_clamps_negatives_and_keeps_values():
     assert out[0, 1] == 5.0 and out[1, 0] == 10.0
 
 
+def test_sanitize_height_kills_positive_sentinel():
+    # An undeclared positive sentinel (32767) must NOT survive as a 32km building.
+    arr = np.array([[25.0, 32767.0], [np.inf, 3.0]], dtype=np.float32)
+    out = hz.sanitize_height(arr)
+    assert out[0, 0] == 25.0            # real height kept
+    assert out[0, 1] == 0.0             # positive sentinel -> ground
+    assert out[1, 0] == 0.0             # inf -> ground
+    assert out[1, 1] == 3.0
+
+
+def test_sanitize_height_nodata_and_scale():
+    arr = np.array([[250.0, -9999.0], [100.0, 5.0]], dtype=np.float32)
+    out = hz.sanitize_height(arr, nodata=-9999.0, scale=0.1)  # decimeters -> meters
+    assert out[0, 1] == 0.0             # declared nodata -> ground (before scaling)
+    assert abs(out[0, 0] - 25.0) < 1e-4  # 250 dm -> 25 m
+    assert abs(out[1, 0] - 10.0) < 1e-4
+
+
+def test_ndsm_from_dsm_dtm_subtracts_terrain():
+    dsm = np.array([[110.0, 130.0], [105.0, 100.0]], dtype=np.float32)  # surface (AMSL)
+    dtm = np.array([[100.0, 100.0], [108.0, 100.0]], dtype=np.float32)  # bare earth
+    ndsm = hz.ndsm_from_dsm_dtm(dsm, dtm)
+    assert ndsm[0, 0] == 10.0 and ndsm[0, 1] == 30.0  # building heights above ground
+    assert ndsm[1, 0] == 0.0                          # DSM<DTM (noise) -> floored to 0
+    assert ndsm[1, 1] == 0.0                          # flat ground
+
+
 def test_balanced_source_plan_respects_weights():
     # Two sources, equal weight -> equal counts regardless of raw sizes (balance
     # so a big set doesn't drown a small one).
