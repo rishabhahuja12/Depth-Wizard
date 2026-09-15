@@ -1,8 +1,6 @@
 # SETUP — Workstation Training Run (P0 baseline + P1 Stages 1–3)
 
-Self-contained guide for the training workstation (RTX 4500 Ada, 24 GB). Tuned to
-run **gently**: **low learning rate**, **GPU kept under ~50%** (both memory and
-utilization), trading speed for a cool, half-idle card.
+Self-contained guide for the training workstation (RTX 4500 Ada, 24 GB).
 
 > Tiles are streamed directly from the HuggingFace Hub mirror (`earthflow/GAMUS`)
 > and cached locally in `upgrade/data/gamus_cache/` on first use. **No prefetch
@@ -47,27 +45,8 @@ Must print `...+cu1xx True NVIDIA RTX 4500 Ada ...`. If `+cpu`/`False`, redo ste
 
 ---
 
-## 6. Cap the GPU BEFORE training (keeps it under ~50%)
-
-**(a) Power limit** — the cleanest ceiling on sustained compute/heat. Read the max,
-then set roughly half (needs an elevated shell):
-```powershell
-nvidia-smi -q -d POWER | Select-String "Max Power Limit"     # e.g. 210 W
-nvidia-smi -pl 105                                           # ~50% of max
-```
-(If `-pl` is refused, skip it — `--throttle-sleep` in the training command still
-holds utilization down.)
-
-**(b) VRAM** — hard-capped in-process to 50% by the `--max-vram-frac 0.5` flag
-(+ batch 2 + gradient checkpointing), so the run stays under ~12 GB of 24 GB.
-
-**(c) Utilization** — the `--throttle-sleep` flag idles briefly each step so average
-GPU utilization stays low. Start at 0.15 s and tune (step 9).
-
----
-
-## 7. P0 baseline (the BEFORE table)
-Smoke, then full. (Uses the `test` split — streams a small number of tiles from HF.)
+## 6. P0 baseline (the BEFORE table)
+Smoke, then full. (Uses the `test` split — streams tiles from HF Hub on-demand.)
 ```powershell
 .venv\Scripts\python.exe upgrade\evaluation\run_baseline.py --limit 5
 .venv\Scripts\python.exe upgrade\evaluation\run_baseline.py
@@ -76,7 +55,7 @@ Outputs → `upgrade\outputs\baseline_report.md` + `baseline_metrics.csv`.
 
 ---
 
-## 8. Sanity: unit tests (CPU, no GPU) — all should pass before trusting a run
+## 7. Sanity: unit tests (CPU, no GPU) — all should pass before trusting a run
 ```powershell
 Get-ChildItem -Recurse upgrade -Filter test_*.py | ForEach-Object {
   .venv\Scripts\python.exe $_.FullName
@@ -85,22 +64,20 @@ Get-ChildItem -Recurse upgrade -Filter test_*.py | ForEach-Object {
 
 ---
 
-## 9. P1 Stage 1 — metric fine-tune
+## 8. P1 Stage 1 — metric fine-tune
 
 Wiring check (CPU, no GPU, no data download):
 ```powershell
 .venv\Scripts\python.exe upgrade\training\train_metric.py --smoke
 ```
 
-The full run — **low LR, small batch, VRAM-capped, throttled** — logged to a file so
-it survives a disconnect. Tiles are fetched from HF Hub on-demand and cached locally;
-re-runs reuse the cache:
+Full run — logged to a file so it survives a disconnect. Tiles are fetched from
+HF Hub on-demand and cached locally; re-runs reuse the cache:
 ```powershell
 .venv\Scripts\python.exe upgrade\training\train_metric.py --resume `
   --epochs 50 --warmup 3 `
   --enc-lr 2.5e-6 --head-lr 2.5e-5 `
   --batch 2 --grad-accum 8 --crop 504 `
-  --max-vram-frac 0.5 --throttle-sleep 0.15 `
   --workers 4 *>> upgrade\outputs\train_stage1.log
 ```
 
@@ -109,12 +86,10 @@ What each flag does:
 | Flag | Value | Why |
 |---|---|---|
 | `--resume` | on | continue from `metric_last.pth` if interrupted (safe to re-run) |
-| `--enc-lr / --head-lr` | 2.5e-6 / 2.5e-5 | **Half the standard low LRs** — gentle, steady |
-| `--epochs / --warmup` | 50 / 3 | Low LR needs more epochs; longer warmup = softer start |
-| `--batch / --grad-accum` | 2 / 8 | eff. batch 16 but tiny VRAM footprint |
+| `--enc-lr / --head-lr` | 2.5e-6 / 2.5e-5 | half the standard low LRs — gentle, steady |
+| `--epochs / --warmup` | 50 / 3 | low LR needs more epochs; longer warmup = softer start |
+| `--batch / --grad-accum` | 2 / 8 | eff. batch 16 with a small VRAM footprint |
 | `--crop` | 504 | 36×14 — a clean DINOv2 patch multiple; 448 (32×14) is the OOM fallback |
-| `--max-vram-frac` | 0.5 | hard cap → process can't exceed ~12 GB |
-| `--throttle-sleep` | 0.15 | idles each step → holds average GPU utilization ≤ 50% |
 
 > **Tile caching:** the first pass downloads each tile from `earthflow/GAMUS` on
 > HuggingFace and writes it to `upgrade\data\gamus_cache\`. All subsequent runs
@@ -125,30 +100,18 @@ Checkpoints (`upgrade\checkpoints\`): `metric_best.pth` (best val MAE) and
 same command — `--resume` picks up from the last completed epoch. `*>>` appends to
 the log so resumed runs don't clobber history.
 
-Rough budget: ~20–30 h for 50 throttled epochs.
-
 ---
 
-## 10. Watch it stay under 50% (in a second shell)
-```powershell
-while ($true) { nvidia-smi --query-gpu=utilization.gpu,memory.used,power.draw --format=csv,noheader; Start-Sleep 5 }
-```
-- **VRAM** should sit well under ~12 GB. If it OOMs, drop `--crop 448` or `--batch 1`.
-- **Utilization** should hover ≤ 50%. If it runs hotter, **raise `--throttle-sleep`**
-  (e.g. 0.25–0.4); if it's crawling far below 50%, lower it toward 0.
-
----
-
-## 11. The kill-gate (why we measured first)
+## 9. The kill-gate (why we measured first)
 Compare `train_stage1.log`'s best **val MAE** against the P0 baseline MAE:
-- **Beats baseline** → proceed to Stage 2 (§12).
+- **Beats baseline** → proceed to Stage 2 (§10).
 - **Doesn't beat it** → debug data/scaling BEFORE stacking more losses.
 
 Bring both numbers back and we'll decide together.
 
 ---
 
-## 12. Later stages — ONLY after the previous one wins
+## 10. Later stages — ONLY after the previous one wins
 
 Everything below is coded and unit-tested; run in this **gated order** — each step
 must beat the previous on val MAE before the next.
@@ -157,16 +120,14 @@ must beat the previous on val MAE before the next.
 ```powershell
 .venv\Scripts\python.exe upgrade\training\train_metric.py --resume `
   --w-silog 1.0 --w-l1 1.0 --w-grad 0.5 `
-  --epochs 60 --crop 504 --max-vram-frac 0.5 --throttle-sleep 0.15 `
-  --workers 4 *>> upgrade\outputs\train_stage2.log
+  --epochs 60 --crop 504 --workers 4 *>> upgrade\outputs\train_stage2.log
 ```
 
 **Stage 3 — add long-tail (tall-structure) reweighting** (only if Stage 2 helped):
 ```powershell
 .venv\Scripts\python.exe upgrade\training\train_metric.py --resume `
   --w-silog 1.0 --w-l1 1.0 --w-grad 0.5 --w-lt 0.5 `
-  --epochs 60 --crop 504 --max-vram-frac 0.5 --throttle-sleep 0.15 `
-  --workers 4 *>> upgrade\outputs\train_stage3.log
+  --epochs 60 --crop 504 --workers 4 *>> upgrade\outputs\train_stage3.log
 ```
 
 ### Optional: LoRA instead of full fine-tune (fallback / for testing Giant)
@@ -174,12 +135,12 @@ Needs `pip install peft`. Frees VRAM, trains faster, slight ceiling cost:
 ```powershell
 .venv\Scripts\python.exe upgrade\training\train_metric.py --resume --lora `
   --lora-r 16 --lora-alpha 32 --epochs 50 --crop 504 `
-  --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_lora.log
+  *>> upgrade\outputs\train_lora.log
 ```
 
 ---
 
-## 13. Dataset blend (building-height aux) — after GAMUS-only wins
+## 11. Dataset blend (building-height aux) — after GAMUS-only wins
 
 Adopted flow, gated one source at a time on val MAE:
 
@@ -193,7 +154,7 @@ for per-source download and licence details.
 .venv\Scripts\python.exe upgrade\training\train_metric.py --resume --blend `
   --oc-root upgrade\data\open_canopy `
   --aux-fraction 0.3 --aux-gsd 0.5 --crop 504 `
-  --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_blend.log
+  *>> upgrade\outputs\train_blend.log
 ```
 
 ---
@@ -206,7 +167,6 @@ for per-source download and licence details.
   shift slightly and it costs a little CPU per tile.
 - **Off-nadir flag** can false-positive on strong regular grids (Manhattan, farmland);
   it's a warning, not a correction.
-- **VRAM cap** (`--max-vram-frac 0.5`) hard-errors on OOM rather than paging — drop
-  `--crop`/`--batch` if it hits.
 - **First-epoch latency:** the first pass through the dataset downloads all tiles from
   HF Hub; subsequent epochs and resumed runs read from the local cache and are fast.
+  If a tile fails mid-run (network blip), it retries automatically with backoff.

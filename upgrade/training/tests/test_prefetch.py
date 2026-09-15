@@ -1,72 +1,39 @@
 """
-Known-answer tests for the pure logic in gamus_prefetch.
+Tests for gamus_prefetch — now retired.
 
-The resumable-download "checkpoint" is: a tile whose local RGB+AGL files already
-exist is skipped. These tests pin that skip logic and the manifest round-trip so a
-half-finished prefetch can safely resume and an offline run can read the result.
+gamus_prefetch.py has been retired: training streams tiles directly from the
+HuggingFace Hub mirror (earthflow/GAMUS) on-demand. No prefetch step is needed.
+
+This test simply confirms the retired module can still be imported and that
+running it prints a helpful retirement message without error.
 
 Run:
     .venv/Scripts/python.exe upgrade/training/tests/test_prefetch.py
 """
 import sys
-import tempfile
+import subprocess
 from pathlib import Path
 
 TRAIN_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(TRAIN_DIR))
-
-import gamus_prefetch as pf  # noqa: E402
+PYTHON = sys.executable
 
 
-def test_agl_rel_mirrors_rgb_rel():
-    assert pf.agl_rel_for("images/train/DC_03_26_RGB.h5") == "heights/train/DC_03_26_AGL.h5"
+def test_prefetch_module_imports_cleanly():
+    """The retired module must import without raising."""
+    sys.path.insert(0, str(TRAIN_DIR))
+    import gamus_prefetch as pf  # noqa: F401
+    assert callable(pf.main)
 
 
-def test_local_paths_place_under_cache_dir():
-    rgb, agl = pf.local_paths("images/train/DC_1_RGB.h5", Path("/cache"))
-    assert rgb == Path("/cache/images/train/DC_1_RGB.h5")
-    assert agl == Path("/cache/heights/train/DC_1_AGL.h5")
-
-
-def test_tiles_needing_download_skips_completed_pairs():
-    with tempfile.TemporaryDirectory() as d:
-        cache = Path(d)
-        rgbs = ["images/train/A_RGB.h5", "images/train/B_RGB.h5"]
-        # Mark A complete by creating BOTH its local files.
-        for rel in (rgbs[0], pf.agl_rel_for(rgbs[0])):
-            p = cache / rel
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(b"x")
-        needed = pf.tiles_needing_download(rgbs, cache)
-        assert needed == ["images/train/B_RGB.h5"], f"got {needed}"
-
-
-def test_tiles_needing_download_requires_both_files():
-    with tempfile.TemporaryDirectory() as d:
-        cache = Path(d)
-        rel = "images/train/A_RGB.h5"
-        # Only the RGB present, AGL missing -> still needs download.
-        p = cache / rel
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(b"x")
-        assert pf.tiles_needing_download([rel], cache) == [rel]
-
-
-def test_build_manifest_entries():
-    m = pf.build_manifest(["images/test/JAX_9_RGB.h5"], Path("/c"))
-    assert m["count"] == 1
-    e = m["tiles"][0]
-    assert e["tile_id"] == "JAX_9" and e["city"] == "JAX"
-    assert e["rgb_local"] == str(Path("/c/images/test/JAX_9_RGB.h5"))
-    assert e["agl_local"] == str(Path("/c/heights/test/JAX_9_AGL.h5"))
-
-
-def test_manifest_round_trip():
-    with tempfile.TemporaryDirectory() as d:
-        path = Path(d) / "manifest_train.json"
-        manifest = pf.build_manifest(["images/train/DC_1_RGB.h5"], Path("/c"))
-        pf.save_manifest(path, manifest)
-        assert pf.load_manifest(path) == manifest
+def test_prefetch_main_exits_zero():
+    """Running the script directly must exit 0 and print a retirement notice."""
+    script = TRAIN_DIR / "gamus_prefetch.py"
+    result = subprocess.run([PYTHON, str(script)], capture_output=True, text=True)
+    assert result.returncode == 0, f"non-zero exit: {result.stderr}"
+    combined = result.stdout + result.stderr
+    assert "no longer required" in combined.lower() or "retired" in combined.lower() or \
+           "not needed" in combined.lower() or "prefetch is no longer" in combined.lower(), \
+        f"expected retirement message, got:\n{combined}"
 
 
 def _run_all():
@@ -78,6 +45,8 @@ def _run_all():
         except AssertionError as e:
             print(f"FAIL  {t.__name__}: {e}")
         except Exception as e:  # noqa: BLE001
+            import traceback
+            traceback.print_exc()
             print(f"ERROR {t.__name__}: {type(e).__name__}: {e}")
         else:
             passed += 1

@@ -203,17 +203,7 @@ def train(args) -> int:
            epochs=args.epochs, warmup=args.warmup, batch=args.batch, grad_accum=args.grad_accum,
            crop=args.crop, enc_lr=args.enc_lr, head_lr=args.head_lr, lora=args.lora,
            blend=args.blend, aux_fraction=args.aux_fraction,
-           w_silog=args.w_silog, w_l1=args.w_l1, w_grad=args.w_grad, w_lt=args.w_lt,
-           max_vram_frac=args.max_vram_frac, throttle_sleep=args.throttle_sleep)
-
-    # Resource ceiling: hard-cap the fraction of GPU memory this process may use,
-    # so training stays under ~50% VRAM (leaves the card usable for other work).
-    if device.type == "cuda" and args.max_vram_frac:
-        torch.cuda.set_per_process_memory_fraction(args.max_vram_frac, 0)
-        total = torch.cuda.get_device_properties(0).total_memory / 1e9
-        print(f"VRAM capped at {args.max_vram_frac:.0%} (~{total * args.max_vram_frac:.1f} GB of {total:.1f} GB)")
-    if args.throttle_sleep > 0:
-        print(f"Throttle: sleeping {args.throttle_sleep:.2f}s per step to hold GPU utilization down")
+           w_silog=args.w_silog, w_l1=args.w_l1, w_grad=args.w_grad, w_lt=args.w_lt)
 
     model = load_model(args.model, device)
     if args.lora:
@@ -303,11 +293,6 @@ def train(args) -> int:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optim.step()
                 optim.zero_grad(set_to_none=True)
-
-            # Duty-cycle throttle: idle briefly so average GPU utilization stays
-            # low. We have all weekend; a cool, half-idle card is the goal.
-            if args.throttle_sleep > 0:
-                time.sleep(args.throttle_sleep)
 
         sched.step()
         # G2: validate on GAMUS (urban) AND each held-out aux landscape, then gate
@@ -408,23 +393,18 @@ def main() -> int:
                     help="Stage 3: long-tail tall-structure weight (0 = off)")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--val-tiles", type=int, default=40, dest="val_tiles")
-    # Resource ceilings (weekend gentle-run defaults keep the GPU under ~50%).
-    ap.add_argument("--max-vram-frac", type=float, default=0.5, dest="max_vram_frac",
-                    help="hard cap on fraction of GPU memory this process may use (0 = uncapped)")
-    ap.add_argument("--throttle-sleep", type=float, default=0.0, dest="throttle_sleep",
-                    help="seconds to idle per step; raise to lower average GPU utilization")
     ap.add_argument("--resume", action="store_true",
                     help="resume from upgrade/checkpoints/metric_last.pth if present")
     ap.add_argument("--tile-size", type=int, default=1024, dest="tile_size",
                     help="source tile size for deterministic cell grid (GAMUS = 1024)")
-    # Dataset blend (Open-Canopy / GBH) — only after GAMUS-only wins.
-    ap.add_argument("--blend", action="store_true", help="mix Open-Canopy/GBH into GAMUS")
+    # Dataset blend (Open-Canopy / aux sources) — only after GAMUS-only wins.
+    ap.add_argument("--blend", action="store_true", help="mix aux sources into GAMUS")
     ap.add_argument("--oc-root", default=None, dest="oc_root", help="Open-Canopy download root")
     ap.add_argument("--gbh-root", default=None, dest="gbh_root", help="GBH download root")
     ap.add_argument("--geonrw-root", default=None, dest="geonrw_root",
                     help="GeoNRW root (ON HOLD; height_subdir must be DERIVED nDSM — see derive_ndsm)")
     ap.add_argument("--m4h-root", default=None, dest="m4h_root",
-                    help="M4Heights root (extracted 1 m aerial rgb/ + height/ — see prefetch_m4heights)")
+                    help="M4Heights root (extracted 1 m aerial rgb/ + height/)")
     ap.add_argument("--dfc-root", default=None, dest="dfc_root",
                     help="DFC2023 Track 2 root (train split; rgb/ + ndsm/)")
     ap.add_argument("--us3d-root", default=None, dest="us3d_root",
@@ -432,8 +412,7 @@ def main() -> int:
     ap.add_argument("--aux-fraction", type=float, default=0.3, dest="aux_fraction",
                     help="aux samples as a fraction of GAMUS length")
     ap.add_argument("--aux-weights", default=None, dest="aux_weights",
-                    help="per-source blend weights, e.g. 'open_canopy=1.0,dfc2023=0.5' "
-                         "(down-weight a noisy source; default 1.0 each)")
+                    help="per-source blend weights, e.g. 'open_canopy=1.0,dfc2023=0.5'")
     ap.add_argument("--aux-gsd", type=float, default=0.5, dest="aux_gsd",
                     help="common GSD (m) to harmonize aux sources to")
     ap.add_argument("--cache-dir", default=str(DATA_CACHE), dest="cache_dir",
