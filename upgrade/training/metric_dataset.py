@@ -5,6 +5,10 @@ This is the deliberate contrast with backend/training/train_gamus_full.py, whose
 FullGAMUSDataset percentile-normalizes the target to [0,1] (line ~187), destroying
 metric scale before the loss ever sees it. Here the nDSM stays in meters.
 
+Tiles are streamed directly from the HuggingFace Hub mirror (earthflow/GAMUS) and
+cached locally in cache_dir on first download — no prefetch step is needed.
+Subsequent runs reuse the local cache transparently via hf_hub_download.
+
 Augmentation is appearance-only + flips/rotations (which preserve the
 height<->image correspondence). NO tilt/perspective warps — those would corrupt
 the nDSM label (see research §3.3).
@@ -73,13 +77,7 @@ def normalize_rgb(rgb_patch: np.ndarray) -> np.ndarray:
     return np.transpose(x, (2, 0, 1)).copy()
 
 
-# --------------------------- offline manifest readers ---------------------------
-
-def offline_tiles(manifest_path) -> list[dict]:
-    """Read a prefetch manifest (produced by gamus_prefetch) — list of tile dicts
-    with rgb_local/agl_local/city/tile_id. Pure JSON, no network."""
-    import json
-    return json.loads(Path(manifest_path).read_text(encoding="utf-8"))["tiles"]
+# --------------------------- dataset ---------------------------
 
 
 def _read_h5_pair(rgb_local: str, agl_local: str, box: tuple[int, int, int] | None = None):
@@ -102,31 +100,15 @@ def _read_h5_pair(rgb_local: str, agl_local: str, box: tuple[int, int, int] | No
     return rgb_full[..., :3], agl_full
 
 
-def iter_manifest_full_tiles(manifest_path, limit: int | None = None):
-    """Yield (tile_id, city, rgb_full, agl_full) from a prefetched split, offline.
-    Used for held-out evaluation without touching HuggingFace."""
-    tiles = offline_tiles(manifest_path)
-    if limit is not None:
-        tiles = tiles[:limit]
-    for t in tiles:
-        try:
-            rgb_full, agl_full = _read_h5_pair(t["rgb_local"], t["agl_local"])
-        except Exception as e:  # noqa: BLE001
-            print(f"  skip {t.get('tile_id')}: {type(e).__name__}: {e}")
-            continue
-        yield t["tile_id"], t["city"], rgb_full, agl_full
-
-
 # --------------------------- dataset ---------------------------
 
 class MetricGAMUSDataset:
     """torch Dataset over GAMUS RGB->nDSM(meters) pairs for metric fine-tuning.
 
-    Two modes:
-      * offline=True  -> reads a prefetch manifest and local h5 files, NO network
-        (use after running gamus_prefetch; robust to internet drops).
-      * offline=False -> lazily lists + downloads tiles from HuggingFace, with
-        retries; caches to disk as it goes.
+    Tiles are listed from the HuggingFace Hub mirror (earthflow/GAMUS) and
+    downloaded on-demand via hf_hub_download, which caches each file to
+    cache_dir on first use — no prefetch step needed. Subsequent runs
+    reuse cached files transparently.
 
     Sampling is ZERO-AUGMENTATION by default: each 1024 tile is partitioned into
     deterministic non-overlapping `crop`-sized cells (tile_grid). No random crop,
@@ -140,8 +122,7 @@ class MetricGAMUSDataset:
 
     def __init__(self, split: str = "train", crop: int = 512, augment: bool = False,
                  cache_dir: Path | None = None, seed: int = 42, repo: str = "earthflow/GAMUS",
-                 offline: bool = False, manifest_path: Path | None = None, retries: int = 4,
-                 tile_size: int | None = None):
+                 retries: int = 4, tile_size: int | None = None):
         from torch.utils.data import Dataset  # noqa: F401  (marker that torch is available)
 
         self.split = split
@@ -149,25 +130,18 @@ class MetricGAMUSDataset:
         self.augment = augment
         self.tile_size = tile_size or self.TILE_SIZE
         self.repo = repo
-        self.offline = offline
         self.retries = retries
         self.cache_dir = cache_dir or (Path(__file__).resolve().parent.parent / "data" / "gamus_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.rng = np.random.default_rng(seed)
 
-        if offline:
-            mp = Path(manifest_path) if manifest_path else self.cache_dir / f"manifest_{split}.json"
-            if not mp.exists():
-                raise FileNotFoundError(
-                    f"Offline mode but no manifest at {mp}. Run gamus_prefetch first.")
-            self.tiles = offline_tiles(mp)
-            n_tiles = len(self.tiles)
-        else:
-            from huggingface_hub import list_repo_files
-            all_files = list_repo_files(repo, repo_type="dataset")
-            prefix = f"images/{split}/"
-            self.rgb_files = sorted(f for f in all_files if f.startswith(prefix) and f.endswith("_RGB.h5"))
-            n_tiles = len(self.rgb_files)
+        # List tiles from HF Hub (result is stable / sorted, so the index is deterministic).
+        from huggingface_hub import list_repo_files
+        all_files = list_repo_files(repo, repo_type="dataset")
+        prefix = f"images/{split}/"
+        self.rgb_files = sorted(f for f in all_files if f.startswith(prefix) and f.endswith("_RGB.h5"))
+        n_tiles = len(self.rgb_files)
+        print(f"GAMUS '{split}': {n_tiles} tiles listed from HF Hub ({repo})")
 
         # Flatten (tile, cell) into a deterministic sample index.
         cells = tile_grid(self.tile_size, self.tile_size, crop)
@@ -180,9 +154,7 @@ class MetricGAMUSDataset:
         return rgb_rel.replace("images/", "heights/").replace("_RGB.h5", "_AGL.h5")
 
     def _read_cell(self, tile_i: int, box):
-        if self.offline:
-            t = self.tiles[tile_i]
-            return _read_h5_pair(t["rgb_local"], t["agl_local"], box=box)
+        """Download (cached) the tile from HF Hub and slice the requested cell."""
         import time
         from huggingface_hub import hf_hub_download
         rgb_rel = self.rgb_files[tile_i]

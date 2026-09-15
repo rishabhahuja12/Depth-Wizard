@@ -1,11 +1,12 @@
-# SETUP — Workstation Gentle Weekend Run (P0 baseline + P1 Stage 1)
+# SETUP — Workstation Training Run (P0 baseline + P1 Stages 1–3)
 
 Self-contained guide for the training workstation (RTX 4500 Ada, 24 GB). Tuned to
-run **gently over the weekend**: **low learning rate**, **GPU kept under ~50%**
-(both memory and utilization), trading speed for a cool, half-idle card.
+run **gently**: **low learning rate**, **GPU kept under ~50%** (both memory and
+utilization), trading speed for a cool, half-idle card.
 
-> This supersedes the training section of `docs/WORKSTATION_SETUP.md`; the env steps
-> below are the same, the run config is the gentle one.
+> Tiles are streamed directly from the HuggingFace Hub mirror (`earthflow/GAMUS`)
+> and cached locally in `upgrade/data/gamus_cache/` on first use. **No prefetch
+> step is needed** — just run training and tiles download on-demand.
 
 ---
 
@@ -54,33 +55,19 @@ then set roughly half (needs an elevated shell):
 nvidia-smi -q -d POWER | Select-String "Max Power Limit"     # e.g. 210 W
 nvidia-smi -pl 105                                           # ~50% of max
 ```
-(If `-pl` is refused, skip it — the throttle in step 9 still holds utilization down.)
+(If `-pl` is refused, skip it — `--throttle-sleep` in the training command still
+holds utilization down.)
 
-**(b) VRAM** — hard-capped in-process to 50% by the `--max-vram-frac 0.5` flag below
+**(b) VRAM** — hard-capped in-process to 50% by the `--max-vram-frac 0.5` flag
 (+ batch 2 + gradient checkpointing), so the run stays under ~12 GB of 24 GB.
 
 **(c) Utilization** — the `--throttle-sleep` flag idles briefly each step so average
-GPU utilization stays low. Start at 0.15 s and tune (step 10).
+GPU utilization stays low. Start at 0.15 s and tune (step 9).
 
 ---
 
-## 7. One-time prefetch — the ONLY step that needs internet
-Download the whole **train + val** split **and** the DA2-Large model ONCE, so the
-long training run can then go fully offline. It is **resumable** (the "dataset
-checkpoint"): re-running skips whatever's already on disk, so a dropped connection
-is harmless — just run it again.
-```powershell
-.venv\Scripts\python.exe upgrade\training\gamus_prefetch.py
-```
-- Caches to `upgrade\data\gamus_cache\` and writes `manifest_train.json` / `manifest_val.json`.
-- Also caches the model for offline loading.
-- Tens of GB — check disk space. Re-run until it prints **"All set"**.
-
-> After this, **training (step 9) needs no internet at all** — you can unplug it.
-
-## 8. P0 baseline (the BEFORE table)
-Smoke, then full. (This uses the `test` split and streams online — a short one-shot
-run, so a connection here is fine; it's the multi-day *training* we made offline.)
+## 7. P0 baseline (the BEFORE table)
+Smoke, then full. (Uses the `test` split — streams a small number of tiles from HF.)
 ```powershell
 .venv\Scripts\python.exe upgrade\evaluation\run_baseline.py --limit 5
 .venv\Scripts\python.exe upgrade\evaluation\run_baseline.py
@@ -89,53 +76,56 @@ Outputs → `upgrade\outputs\baseline_report.md` + `baseline_metrics.csv`.
 
 ---
 
-## 9. P1 Stage 1 — gentle metric fine-tune (OFFLINE)
+## 8. Sanity: unit tests (CPU, no GPU) — all should pass before trusting a run
+```powershell
+Get-ChildItem -Recurse upgrade -Filter test_*.py | ForEach-Object {
+  .venv\Scripts\python.exe $_.FullName
+}
+```
 
-Wiring check (CPU, no GPU/GAMUS):
+---
+
+## 9. P1 Stage 1 — metric fine-tune
+
+Wiring check (CPU, no GPU, no data download):
 ```powershell
 .venv\Scripts\python.exe upgrade\training\train_metric.py --smoke
 ```
 
-The weekend run — **offline, low LR, small batch, VRAM-capped, throttled** — logged
-to a file so it survives a disconnect. `--offline` reads only the prefetched data,
-so you can literally unplug the network:
+The full run — **low LR, small batch, VRAM-capped, throttled** — logged to a file so
+it survives a disconnect. Tiles are fetched from HF Hub on-demand and cached locally;
+re-runs reuse the cache:
 ```powershell
-.venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume `
+.venv\Scripts\python.exe upgrade\training\train_metric.py --resume `
   --epochs 50 --warmup 3 `
   --enc-lr 2.5e-6 --head-lr 2.5e-5 `
   --batch 2 --grad-accum 8 --crop 504 `
   --max-vram-frac 0.5 --throttle-sleep 0.15 `
   --workers 4 *>> upgrade\outputs\train_stage1.log
 ```
-What each choice does:
+
+What each flag does:
+
 | Flag | Value | Why |
 |---|---|---|
-| `--offline` | on | read only prefetched local data — **no internet, immune to drops** |
-| `--resume` | on | continue from `metric_last.pth` if the run was interrupted (safe to re-run) |
-| `--enc-lr / --head-lr` | 2.5e-6 / 2.5e-5 | **Half the standard low LRs** — gentle, steady; we have time |
+| `--resume` | on | continue from `metric_last.pth` if interrupted (safe to re-run) |
+| `--enc-lr / --head-lr` | 2.5e-6 / 2.5e-5 | **Half the standard low LRs** — gentle, steady |
 | `--epochs / --warmup` | 50 / 3 | Low LR needs more epochs; longer warmup = softer start |
 | `--batch / --grad-accum` | 2 / 8 | eff. batch 16 but tiny VRAM footprint |
-| `--crop` | 504 | deterministic tile-cells (4 per 1024 tile), zero augmentation; **504 = 36×14, a multiple of the DINOv2 patch** so there's no patch-boundary interpolation (512 isn't). 448 (32×14) is the clean OOM fallback |
+| `--crop` | 504 | 36×14 — a clean DINOv2 patch multiple; 448 (32×14) is the OOM fallback |
 | `--max-vram-frac` | 0.5 | hard cap → process can't exceed ~12 GB |
-| `--throttle-sleep` | 0.15 | idles each step → holds average GPU utilization down |
+| `--throttle-sleep` | 0.15 | idles each step → holds average GPU utilization ≤ 50% |
+
+> **Tile caching:** the first pass downloads each tile from `earthflow/GAMUS` on
+> HuggingFace and writes it to `upgrade\data\gamus_cache\`. All subsequent runs
+> (including resumed ones) read from this local cache — no repeated downloads.
 
 Checkpoints (`upgrade\checkpoints\`): `metric_best.pth` (best val MAE) and
 `metric_last.pth` (full state for resume). **Interrupted?** Just re-run the exact
 same command — `--resume` picks up from the last completed epoch. `*>>` appends to
 the log so resumed runs don't clobber history.
-Rough budget: ~20–30 h for 50 throttled epochs — comfortably a weekend.
 
-> Requires step 7. If a manifest is missing it errors immediately
-> ("Offline mode but no manifest ... Run gamus_prefetch first") rather than hanging.
-
-### Optional: LoRA instead of full fine-tune (fallback / for testing Giant)
-Needs `pip install peft`. Frees VRAM, trains faster, slight ceiling cost — use only
-if full-FT stalls or you want to A/B the Giant backbone:
-```powershell
-.venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume --lora `
-  --lora-r 16 --lora-alpha 32 --epochs 50 --crop 504 `
-  --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_lora.log
-```
+Rough budget: ~20–30 h for 50 throttled epochs.
 
 ---
 
@@ -152,107 +142,71 @@ while ($true) { nvidia-smi --query-gpu=utilization.gpu,memory.used,power.draw --
 ## 11. The kill-gate (why we measured first)
 Compare `train_stage1.log`'s best **val MAE** against the P0 baseline MAE:
 - **Beats baseline** → proceed to Stage 2 (§12).
-- **Doesn't beat it** → debug data/scaling BEFORE stacking more losses. Don't pile
-  loss terms on a base that isn't winning.
+- **Doesn't beat it** → debug data/scaling BEFORE stacking more losses.
 
 Bring both numbers back and we'll decide together.
 
 ---
 
-## 12. Later stages — ONLY after the previous one wins (all built & tested)
+## 12. Later stages — ONLY after the previous one wins
 
-Everything below is coded and unit-tested; run it in this **gated order** — each
-step must beat the previous on val MAE (or its own metric) before the next.
+Everything below is coded and unit-tested; run in this **gated order** — each step
+must beat the previous on val MAE before the next.
 
 **Stage 2 — add the edge (Sobel) loss** (sharper building/ridge walls):
 ```powershell
-.venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume `
+.venv\Scripts\python.exe upgrade\training\train_metric.py --resume `
   --w-silog 1.0 --w-l1 1.0 --w-grad 0.5 `
-  --epochs 60 --crop 504 --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_stage2.log
+  --epochs 60 --crop 504 --max-vram-frac 0.5 --throttle-sleep 0.15 `
+  --workers 4 *>> upgrade\outputs\train_stage2.log
 ```
+
 **Stage 3 — add long-tail (tall-structure) reweighting** (only if Stage 2 helped):
 ```powershell
-.venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume `
+.venv\Scripts\python.exe upgrade\training\train_metric.py --resume `
   --w-silog 1.0 --w-l1 1.0 --w-grad 0.5 --w-lt 0.5 `
-  --epochs 60 --crop 504 --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_stage3.log
+  --epochs 60 --crop 504 --max-vram-frac 0.5 --throttle-sleep 0.15 `
+  --workers 4 *>> upgrade\outputs\train_stage3.log
 ```
 
-**Dataset blend (building-height aux)** — only after GAMUS-only wins. **Adopted flow,
-gated one source at a time on val MAE** (plain-English rationale in `docs/DATASETS_GUIDE.md`,
-licences in `docs/DATASET_LICENSES.md`):
-
-  GAMUS → **+Open-Canopy** (forest) → **+M4Heights** (urban, HF-easy) → **+DFC2023**
-  (global diversity: sparse/hilly/non-Western) → **NL pair-builder** (0.5 m LiDAR
-  quality ceiling, only if the easier adds plateau).
-
-All adapters + flags are now wired: `--oc-root` (prefetch wired), `--m4h-root`,
-`--dfc-root`, `--us3d-root`, `--geonrw-root`, plus `--aux-fraction` / `--aux-weights`.
-The shared reader handles each source's quirks (nodata/scale, `_RGB`↔`_AGL` names,
-multi-band imagery, recursive/nested pairing, DSM→nDSM). What remains per source is the
-**data download + confirming the real folder layout** (M4Heights: gated HF pull +
-unzip the aerial slice, see `prefetch_m4heights`; DFC2023: IEEE DataPort train split;
-US3D: fallback, needs a stem rule if a tile has many views). **GeoNRW** stays dormant
-until a DTM is sourced. GBH stays **dropped** (paired RGB not public).
-
-1. Get the data (large — grab slices):
-   - **Open-Canopy** — *primary aux slice* (HF, GeoTIFF, 1.5 m, open license):
-     resumable slice download —
-     ```powershell
-     .venv\Scripts\python.exe -c "import sys; sys.path.insert(0,'upgrade/training'); import aux_datasets as a; a.prefetch_open_canopy('upgrade/data/open_canopy', allow_patterns=None)"
-     ```
-     (Set `allow_patterns` to grab only a slice — the full set is ~360 GB.)
-   - **GBH** — ❌ **DROPPED** (verified). Its paired RGB↔height training data is **not
-     publicly available** — the imagery is PLANET PlanetScope (proprietary); only the
-     derived global height product (GBA.Height, heights only) is public. So it can't
-     feed our RGB→height task. **Blend Open-Canopy alone (omit `--gbh-root`).** Details
-     in `upgrade\docs\DATASET_LICENSES.md`.
-2. **Confirm the real folder names** and pass them as subdirs (defaults may differ
-   from the actual download): the sources take `rgb_subdir` / `height_subdir`.
-3. Train blended (after Stage 1+ on GAMUS):
-   ```powershell
-   .venv\Scripts\python.exe upgrade\training\train_metric.py --offline --resume --blend `
-     --oc-root upgrade\data\open_canopy `
-     --aux-fraction 0.3 --aux-gsd 0.5 --crop 504 `
-     --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_blend.log
-   ```
-   (GBH dropped — Open-Canopy is the sole aux source. `--gbh-root` remains available
-   only if you separately hold licensed paired PLANET rasters.)
-   GAMUS keeps native tiling; aux is harmonized (GSD→common grid, meters) and mixed
-   at `--aux-fraction` of GAMUS length, balanced across sources.
-
-> Honest caveat: the aux source readers are validated against real GeoTIFFs (tests),
-> but the exact Open-Canopy/GBH **folder layout must be confirmed** against your
-> download, and GBH's **data license verified**, before a real blend run.
-
-**Inference-side (P1b / P2 / P4)** — used when serving the trained model, not during
-training. All tested, in `upgrade\inference\`:
-- `dem_base.py` — compose absolute DSM = real DEM base + nDSM (flood-critical).
-- `tiling.py` — seamless tiled hi-res inference (Export path; Live stays 1-pass).
-- `off_nadir.py` — obliqueness flag ("⚠ oblique — reduced accuracy").
-
-These integrate into the live app as a **separate, deliberate step** (logged in
-`upgrade\docs\INTEGRATIONS.md`) once a metric checkpoint has passed the gate.
+### Optional: LoRA instead of full fine-tune (fallback / for testing Giant)
+Needs `pip install peft`. Frees VRAM, trains faster, slight ceiling cost:
+```powershell
+.venv\Scripts\python.exe upgrade\training\train_metric.py --resume --lora `
+  --lora-r 16 --lora-alpha 32 --epochs 50 --crop 504 `
+  --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_lora.log
+```
 
 ---
 
-## Known limitations (from code review — not bugs, watch for them)
-- **Aux sampling is deterministic:** each epoch draws the *same* evenly-spaced tiles
-  (and the center cell of each), so a large aux source only ever shows a fixed
-  subset. Intentional (reproducible, zero-augmentation); raise `--aux-fraction` or
-  add sources for more coverage.
-- **Windows + HDF5 workers:** if `--workers 4` causes `PermissionError`/IO stutter on
-  the h5 tiles, drop to `--workers 2` or `0`.
-- **16-bit RGB is percentile-stretched per channel** (for viewability); colours may
+## 13. Dataset blend (building-height aux) — after GAMUS-only wins
+
+Adopted flow, gated one source at a time on val MAE:
+
+  GAMUS → **+Open-Canopy** (forest) → **+M4Heights** (urban, HF-easy) → **+DFC2023**
+  (global diversity) → **NL pair-builder** (0.5 m LiDAR quality ceiling)
+
+All adapters are wired; see `docs/DATASETS_GUIDE.md` and `docs/DATASET_LICENSES.md`
+for per-source download and licence details.
+
+```powershell
+.venv\Scripts\python.exe upgrade\training\train_metric.py --resume --blend `
+  --oc-root upgrade\data\open_canopy `
+  --aux-fraction 0.3 --aux-gsd 0.5 --crop 504 `
+  --max-vram-frac 0.5 --throttle-sleep 0.15 *>> upgrade\outputs\train_blend.log
+```
+
+---
+
+## Known limitations
+
+- **Windows + HDF5 workers:** if `--workers 4` causes `PermissionError`/IO stutter
+  on cached h5 tiles, drop to `--workers 2` or `0`.
+- **16-bit RGB** is percentile-stretched per channel for viewability; colours may
   shift slightly and it costs a little CPU per tile.
 - **Off-nadir flag** can false-positive on strong regular grids (Manhattan, farmland);
-  it's a warning, not a correction. **VRAM cap** (`--max-vram-frac 0.5`) hard-errors
-  on OOM rather than paging — drop `--crop`/`--batch` if it hits.
-
-## Sanity: unit tests (CPU, no GPU) — all should pass before trusting a run
-```powershell
-Get-ChildItem -Recurse upgrade -Filter test_*.py | ForEach-Object {
-  .venv\Scripts\python.exe $_.FullName
-}
-```
-The end-to-end `test_train_integration.py` actually runs the training loop + a
-checkpoint resume on CPU — the closest proof the workstation path is sound.
+  it's a warning, not a correction.
+- **VRAM cap** (`--max-vram-frac 0.5`) hard-errors on OOM rather than paging — drop
+  `--crop`/`--batch` if it hits.
+- **First-epoch latency:** the first pass through the dataset downloads all tiles from
+  HF Hub; subsequent epochs and resumed runs read from the local cache and are fast.

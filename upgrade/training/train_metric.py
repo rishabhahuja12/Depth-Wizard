@@ -7,6 +7,8 @@ backend/training/train_gamus_full.py:
   * Backbone = Large (DINOv2-L + DPT), differential LR (enc 5e-6 / head 5e-5).
   * bf16 autocast + gradient checkpointing + grad-accumulation for 24 GB.
   * Early-stops on held-out MAE using the P0 metrics (evidence, not vibes).
+  * Streams GAMUS tiles directly from HuggingFace Hub (no prefetch step needed);
+    tiles are cached locally in upgrade/data/gamus_cache/ on first download.
 
 Smoke-test the wiring on CPU (no GAMUS download, tiny random batch, small model):
     .venv/Scripts/python.exe upgrade/training/train_metric.py --smoke
@@ -112,17 +114,14 @@ def predict_depth(model, images: torch.Tensor, out_hw) -> torch.Tensor:
 # --------------------------- validation (held-out MAE) ---------------------------
 
 @torch.no_grad()
-def evaluate_mae(model, device, limit: int, crop: int, offline: bool, cache_dir) -> float:
-    """Direct metric MAE on a held-out val subset — no calibration, no normalization."""
+def evaluate_mae(model, device, limit: int, crop: int, cache_dir) -> float:
+    """Direct metric MAE on a held-out val subset — no calibration, no normalization.
+    Streams tiles from HuggingFace Hub; locally cached in cache_dir."""
     import numpy as np
     import metrics
+    import gamus_eval_loader as loader
 
-    if offline:
-        import metric_dataset as md
-        src = md.iter_manifest_full_tiles(Path(cache_dir) / "manifest_val.json", limit=limit)
-    else:
-        import gamus_eval_loader as loader
-        src = loader.iter_eval_tiles("val", limit=limit)
+    src = loader.iter_eval_tiles("val", limit=limit)
 
     import metric_dataset as md
     model.eval()
@@ -200,7 +199,7 @@ def parse_aux_weights(spec, sources) -> dict:
 def train(args) -> int:
     log = get_logger("train_metric")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    log_kv(log, "run start", device=str(device), model=args.model, offline=args.offline,
+    log_kv(log, "run start", device=str(device), model=args.model,
            epochs=args.epochs, warmup=args.warmup, batch=args.batch, grad_accum=args.grad_accum,
            crop=args.crop, enc_lr=args.enc_lr, head_lr=args.head_lr, lora=args.lora,
            blend=args.blend, aux_fraction=args.aux_fraction,
@@ -241,7 +240,7 @@ def train(args) -> int:
     from torch.utils.data import DataLoader
     import metric_dataset as md
     dataset = md.MetricGAMUSDataset(split="train", crop=args.crop, augment=args.augment,
-                                    offline=args.offline, cache_dir=Path(args.cache_dir),
+                                    cache_dir=Path(args.cache_dir),
                                     tile_size=args.tile_size)
     # Optional dataset blend: GAMUS (native tiling) + harmonized aux sources
     # (Open-Canopy / GBH) mixed in at a controlled fraction. Only after GAMUS-only
@@ -275,8 +274,7 @@ def train(args) -> int:
 
     loader = DataLoader(dataset, batch_size=args.batch, shuffle=True,
                         num_workers=args.workers, pin_memory=True, drop_last=True)
-    print(f"Train samples: {len(dataset)} | batch {args.batch} x grad-accum {args.grad_accum}"
-          f"{' | OFFLINE' if args.offline else ''}")
+    print(f"Train samples: {len(dataset)} | batch {args.batch} x grad-accum {args.grad_accum} | ONLINE (HF Hub)")
 
     ckpt_dir = Path(getattr(args, "ckpt_dir", None) or CKPT_DIR)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -316,7 +314,7 @@ def train(args) -> int:
         # on the MEAN — so a blend that improves forests/diversity isn't rejected
         # just because GAMUS-urban MAE was flat.
         maes = {"gamus": evaluate_mae(model, device, limit=args.val_tiles, crop=args.crop,
-                                      offline=args.offline, cache_dir=args.cache_dir)}
+                                      cache_dir=args.cache_dir)}
         for vs in aux_val_sources:
             maes[vs.name] = evaluate_aux_mae(model, device, vs, args.aux_gsd, args.crop,
                                              limit=args.val_tiles)
@@ -438,10 +436,8 @@ def main() -> int:
                          "(down-weight a noisy source; default 1.0 each)")
     ap.add_argument("--aux-gsd", type=float, default=0.5, dest="aux_gsd",
                     help="common GSD (m) to harmonize aux sources to")
-    ap.add_argument("--offline", action="store_true",
-                    help="read only local prefetched data (run gamus_prefetch first); no network")
     ap.add_argument("--cache-dir", default=str(DATA_CACHE), dest="cache_dir",
-                    help="local GAMUS cache / manifest dir (matches gamus_prefetch)")
+                    help="local tile cache dir; hf_hub_download writes here, reused on repeated runs")
     ap.add_argument("--ckpt-dir", default=str(CKPT_DIR), dest="ckpt_dir",
                     help="where to write metric_best.pth / metric_last.pth")
     ap.add_argument("--smoke", action="store_true", help="CPU wiring check, no GAMUS/GPU")
@@ -449,14 +445,6 @@ def main() -> int:
     args = ap.parse_args()
     if args.dora:
         args.lora = True  # DoRA is a LoRA variant
-
-    if args.offline:
-        # Force HuggingFace fully offline BEFORE transformers/hf_hub are used, so a
-        # missing network never stalls the run. Everything must be prefetched.
-        import os
-        os.environ["HF_HUB_OFFLINE"] = "1"
-        os.environ["HF_DATASETS_OFFLINE"] = "1"
-        os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
     return smoke(args) if args.smoke else train(args)
 
