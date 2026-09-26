@@ -41,6 +41,18 @@ import time
 import zipfile
 from pathlib import Path
 
+# Ensure live unbuffered console output
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
 # ============================================================================
 # PATHS
 # ============================================================================

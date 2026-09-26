@@ -1,30 +1,21 @@
 """
-Download Open-Canopy dataset slice into .\\Open-Canopy.
-
-HF Repo: AI4Forest/Open-Canopy
-Note: The full Open-Canopy dataset is ~360 GB.
-This script downloads a manageable slice (e.g. 2021) or full train data.
-Expected layout for Depth-Wizard:
-  .\\Open-Canopy\\images\\*.tif
-  .\\Open-Canopy\\canopy_height\\*.tif
+Depth-Wizard — Open-Canopy Resilient Downloader
+Calls the bulletproof paired downloader in download_all_aux_datasets.py
 """
-from huggingface_hub import snapshot_download
+import sys
+from pathlib import Path
 
-print("Starting Open-Canopy download...")
-print("Destination: .\\Open-Canopy")
-print("Repository: AI4Forest/Open-Canopy")
-print()
+# Add project root to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# You can adjust allow_patterns to limit download size if needed (e.g. specific years)
-snapshot_download(
-    repo_id="AI4Forest/Open-Canopy",
-    repo_type="dataset",
-    local_dir="./Open-Canopy",
-    max_workers=4
-)
+from download_all_aux_datasets import download_open_canopy
 
-print()
-print("===================================")
-print("OPEN-CANOPY DOWNLOAD COMPLETE")
-print("Location: .\\Open-Canopy")
-print("===================================")
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Download Open-Canopy 2023 paired dataset")
+    parser.add_argument("--limit", type=int, default=None, help="Limit number of paired tiles (e.g. --limit 5). Default: all 18.")
+    parser.add_argument("--token", type=str, default=None, help="Optional Hugging Face access token.")
+    args = parser.parse_args()
+
+    success = download_open_canopy(limit=args.limit, token=args.token)
+    sys.exit(0 if success else 1)
