@@ -1,0 +1,73 @@
+[STAGE 1] Starting Python process... 
+Loading weights:   0%|          | 0/503 [00:00<?, ?it/s]Loading weights:   2%|2         | 11/503 [00:00<00:04, 102.94it/s]Loading weights:   6%|5         | 30/503 [00:00<00:03, 143.77it/s]Loading weights:   9%|8         | 45/503 [00:00<00:05, 89.83it/s] Loading weights:  11%|#1        | 56/503 [00:00<00:05, 74.66it/s]Loading weights: 100%|##########| 503/503 [00:00<00:00, 746.56it/s]
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 1s [Retry 1/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 2s [Retry 2/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 4s [Retry 3/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 8s [Retry 4/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 8s [Retry 5/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 1s [Retry 1/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 2s [Retry 2/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 4s [Retry 3/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 8s [Retry 4/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 8s [Retry 5/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 1s [Retry 1/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 2s [Retry 2/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 4s [Retry 3/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 8s [Retry 4/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Retrying in 8s [Retry 5/5].
+'[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1006)' thrown while requesting HEAD https://huggingface.co/datasets/earthflow/GAMUS/resolve/main/heights/train/PHL_5614_AGL.h5
+Traceback (most recent call last):
+  File "D:\Depth-Wizard\upgrade\training\train_metric.py", line 432, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "D:\Depth-Wizard\upgrade\training\train_metric.py", line 428, in main
+    return smoke(args) if args.smoke else train(args)
+                                          ^^^^^^^^^^^
+  File "D:\Depth-Wizard\upgrade\training\train_metric.py", line 284, in train
+    for i, (images, targets) in enumerate(loader):
+  File "D:\Depth-Wizard\.venv\Lib\site-packages\torch\utils\data\dataloader.py", line 708, in __next__
+    data = self._next_data()
+           ^^^^^^^^^^^^^^^^^
+  File "D:\Depth-Wizard\.venv\Lib\site-packages\torch\utils\data\dataloader.py", line 764, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Depth-Wizard\.venv\Lib\site-packages\torch\utils\data\_utils\fetch.py", line 52, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Depth-Wizard\.venv\Lib\site-packages\torch\utils\data\_utils\fetch.py", line 52, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+            ~~~~~~~~~~~~^^^^^
+  File "D:\Depth-Wizard\upgrade\training\metric_dataset.py", line 605, in __getitem__
+    rgb, agl = self._read_cell(
+               ^^^^^^^^^^^^^^^^
+  File "D:\Depth-Wizard\upgrade\training\metric_dataset.py", line 537, in _read_cell
+    raise RuntimeError(
+RuntimeError: Failed to load GAMUS tile 3458 after 4 attempts: An error happened while trying to locate the file on the Hub and we cannot find the requested files in the local cache. Please check your connection and try again or make sure your Internet connection is on.
+============================================================ 
+STAGE 1 FAILED 
+Exit code: 1 
+Time: 16-09-2026 17:53:00.11 
+============================================================ 
+[STAGE 1] Starting Python process... 
+Loading weights:   0%|          | 0/503 [00:00<?, ?it/s]Loading weights:   2%|1         | 9/503 [00:00<00:05, 89.20it/s]Loading weights:   4%|3         | 18/503 [00:00<00:05, 88.15it/s]Loading weights:   5%|5         | 27/503 [00:00<00:08, 53.36it/s]Loading weights:   7%|6         | 34/503 [00:00<00:08, 56.38it/s]Loading weights: 100%|##########| 503/503 [00:00<00:00, 773.55it/s]
+[STAGE 2] Starting Python process... 
+Loading weights:   0%|          | 0/503 [00:00<?, ?it/s]Loading weights:   4%|4         | 21/503 [00:00<00:02, 190.09it/s]Loading weights:   8%|8         | 41/503 [00:00<00:02, 178.00it/s]Loading weights:  12%|#1        | 59/503 [00:00<00:02, 154.89it/s]Loading weights:  15%|#4        | 75/503 [00:00<00:04, 95.76it/s] Loading weights:  18%|#7        | 90/503 [00:00<00:03, 105.49it/s]Loading weights:  20%|##        | 103/503 [00:00<00:03, 110.61it/s]Loading weights:  23%|##3       | 116/503 [00:00<00:03, 110.28it/s]Loading weights: 100%|##########| 503/503 [00:00<00:00, 503.63it/s]
+[STAGE 3] Starting Python process... 
+Loading weights:   0%|          | 0/503 [00:00<?, ?it/s]Loading weights:   2%|2         | 12/503 [00:00<00:05, 84.34it/s]Loading weights:   4%|4         | 21/503 [00:00<00:06, 71.96it/s]Loading weights:   6%|5         | 29/503 [00:00<00:07, 64.89it/s]Loading weights:   8%|8         | 42/503 [00:00<00:05, 82.52it/s]Loading weights:  10%|#         | 52/503 [00:00<00:05, 83.43it/s]Loading weights:  12%|#2        | 61/503 [00:00<00:05, 76.32it/s]Loading weights: 100%|##########| 503/503 [00:00<00:00, 578.08it/s]

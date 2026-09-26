@@ -24,6 +24,12 @@ backend/weights/archive_run1/
 backend/weights/checkpoints/
 *.npy
 *.npz
+GAMUS/
+Open-Canopy/
+DFC2023/
+M4Heights/
+*.h5
+*.hdf5
 
 # Runtime & Temporary Exports
 backend/exports/

@@ -1,0 +1,13 @@
+{
+  "dfc2023": {
+    "state": "waiting_for_zip",
+    "updated_at": "2026-09-25 14:16:39"
+  },
+  "opencanopy_2023": {
+    "directory": "D:\\Depth-Wizard\\Open-Canopy",
+    "repo": "AI4Forest/Open-Canopy",
+    "state": "downloading",
+    "total_pairs": 1,
+    "updated_at": "2026-09-26 14:48:23"
+  }
+}

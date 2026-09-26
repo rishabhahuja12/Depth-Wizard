@@ -35,23 +35,29 @@ US3D_GSD = 0.3         # WorldView-3 pansharpened RGB
 
 
 def open_canopy_source(root, rgb_subdir: str = "images", height_subdir: str = "canopy_height",
-                       rgb_glob: str = "*.tif") -> GeoTiffHeightSource:
+                       rgb_glob: str = "*.tif", **kw) -> GeoTiffHeightSource:
     """Open-Canopy as a height source (canopy height is already meters-above-ground).
 
-    ⚠ STRUCTURE (verified): Open-Canopy ships as per-YEAR virtual rasters + a
-    `geometries.geojson` of tile bounds — NOT flat matched (rgb, chm) tif pairs. The
-    reader now globs recursively and matches by stem, which handles year-nested
-    per-tile tifs; but if your download is only the big per-year VRTs, you must first
-    tile them (window-read by the geojson geometries) into matched-stem RGB + CHM
-    crops before pointing this at them. Confirm against the actual download."""
+    Supports either:
+    1. Standard layout: images/ (*.tif) and canopy_height/ (*.tif) with shared stems
+    2. Raw HF repo layout: canopy_height/<year>/spot and canopy_height/<year>/lidar
+    """
     root = Path(root)
+    if not (root / rgb_subdir).exists() and (root / "canopy_height").exists():
+        spot_files = list((root / "canopy_height").rglob("compressed_pansharpened_*.tif"))
+        if spot_files and "rgb_token" not in kw:
+            rgb_subdir = "canopy_height"
+            height_subdir = "canopy_height"
+            kw.setdefault("rgb_glob", "compressed_pansharpened_*.tif")
+            kw.setdefault("rgb_token", "compressed_pansharpened_")
+            kw.setdefault("height_token", "compressed_lidar_")
     return GeoTiffHeightSource(name="open_canopy", gsd=OPEN_CANOPY_GSD,
                                rgb_dir=root / rgb_subdir, height_dir=root / height_subdir,
-                               rgb_glob=rgb_glob)
+                               rgb_glob=rgb_glob, **kw)
 
 
 def gbh_source(root, rgb_subdir: str = "rgb", height_subdir: str = "ndsm",
-               rgb_glob: str = "*.tif") -> GeoTiffHeightSource:
+               rgb_glob: str = "*.tif", **kw) -> GeoTiffHeightSource:
     """GBH as a height source (nDSM is meters-above-ground). DROPPED from the plan.
 
     Verified: the paired (RGB + nDSM) GBH training data is NOT publicly available —
@@ -72,11 +78,11 @@ def gbh_source(root, rgb_subdir: str = "rgb", height_subdir: str = "ndsm",
     root = Path(root)
     return GeoTiffHeightSource(name="gbh", gsd=GBH_GSD,
                                rgb_dir=root / rgb_subdir, height_dir=root / height_subdir,
-                               rgb_glob=rgb_glob)
+                               rgb_glob=rgb_glob, **kw)
 
 
 def geonrw_source(root, rgb_subdir: str = "rgb", height_subdir: str = "ndsm",
-                  rgb_glob: str = "*.tif") -> GeoTiffHeightSource:
+                  rgb_glob: str = "*.tif", **kw) -> GeoTiffHeightSource:
     """GeoNRW as a height source. ⚠ ON HOLD — needs a prep step the others don't.
 
     GeoNRW ships aerial RGB + a LiDAR ELEVATION raster (DSM/DEM, first-return
@@ -88,11 +94,11 @@ def geonrw_source(root, rgb_subdir: str = "rgb", height_subdir: str = "ndsm",
     root = Path(root)
     return GeoTiffHeightSource(name="geonrw", gsd=GEONRW_GSD,
                                rgb_dir=root / rgb_subdir, height_dir=root / height_subdir,
-                               rgb_glob=rgb_glob)
+                               rgb_glob=rgb_glob, **kw)
 
 
 def m4heights_source(root, rgb_subdir: str = "rgb", height_subdir: str = "height",
-                     rgb_glob: str = "*.tif") -> GeoTiffHeightSource:
+                     rgb_glob: str = "*.tif", **kw) -> GeoTiffHeightSource:
     """M4Heights aerial slice as a height source (building height, meters-AGL).
 
     ⚠ The HF repo (Rituxx96x/M4Heights) is GATED, zipped, and Sentinel-heavy. Extract
@@ -101,11 +107,11 @@ def m4heights_source(root, rgb_subdir: str = "rgb", height_subdir: str = "height
     root = Path(root)
     return GeoTiffHeightSource(name="m4heights", gsd=M4HEIGHTS_GSD,
                                rgb_dir=root / rgb_subdir, height_dir=root / height_subdir,
-                               rgb_glob=rgb_glob)
+                               rgb_glob=rgb_glob, **kw)
 
 
 def dfc2023_source(root, rgb_subdir: str = "rgb", height_subdir: str = "ndsm",
-                   rgb_glob: str = "*.tif") -> GeoTiffHeightSource:
+                   rgb_glob: str = "*.tif", **kw) -> GeoTiffHeightSource:
     """DFC2023 Track 2 as a height source (nDSM, meters-AGL), global diversity.
 
     Use the TRAIN split (val/test GT withheld); drop the SAR channel. nodata in the
@@ -114,7 +120,7 @@ def dfc2023_source(root, rgb_subdir: str = "rgb", height_subdir: str = "ndsm",
     root = Path(root)
     return GeoTiffHeightSource(name="dfc2023", gsd=DFC2023_GSD,
                                rgb_dir=root / rgb_subdir, height_dir=root / height_subdir,
-                               rgb_glob=rgb_glob)
+                               rgb_glob=rgb_glob, **kw)
 
 
 def us3d_source(root, rgb_subdir: str = "images", height_subdir: str = "truth",

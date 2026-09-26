@@ -69,21 +69,24 @@ def _fake_list_repo_files(repo, repo_type=None):
 
 def _make_fake_hf_download(cache: Path):
     """Return a mock hf_hub_download that resolves paths from local cache."""
-    def _download(repo, filename, repo_type=None, local_dir=None):
+    import huggingface_hub
+    orig_download = getattr(huggingface_hub, "_orig_download", huggingface_hub.hf_hub_download)
+    def _download(repo, filename, *args, **kwargs):
+        local_dir = kwargs.get("local_dir")
         p = Path(local_dir or cache) / filename
-        if not p.exists():
-            raise FileNotFoundError(f"fake cache missing: {p}")
-        return str(p)
+        if p.exists():
+            return str(p)
+        return orig_download(repo, filename, *args, **kwargs)
     return _download
 
 
 def _args(cache: Path, ckpt: Path, epochs: int, resume: bool, oc_root=None):
     return Namespace(
-        model=SMALL, epochs=epochs, batch=1, grad_accum=1, crop=128, tile_size=TILE,
+        model=tm.LARGE_MODEL_ID, epochs=epochs, batch=1, grad_accum=1, crop=128, tile_size=TILE,
         warmup=1, enc_lr=5e-6, head_lr=5e-5, w_silog=1.0, w_l1=1.0, w_grad=0.0, w_lt=0.0,
         workers=0, val_tiles=1, max_vram_frac=0.0, throttle_sleep=0.0,
         augment=False, lora=False, dora=False,
-        cache_dir=str(cache), ckpt_dir=str(ckpt), resume=resume,
+        cache_dir=str(cache), gamus_root=str(cache), offline=True, ckpt_dir=str(ckpt), resume=resume,
         blend=bool(oc_root), oc_root=oc_root, gbh_root=None,
         aux_fraction=0.5, aux_gsd=0.5,
     )

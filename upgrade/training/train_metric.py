@@ -92,9 +92,15 @@ def load_ckpt(path, model, optim, sched):
     return int(ckpt.get("epoch", 0)), float(ckpt.get("best_mae", float("inf")))
 
 
-def load_model(model_id: str, device):
+def load_model(model_id: str, device, offline: bool = False):
     from transformers import AutoModelForDepthEstimation
-    model = AutoModelForDepthEstimation.from_pretrained(model_id)
+    try:
+        if offline:
+            model = AutoModelForDepthEstimation.from_pretrained(model_id, local_files_only=True)
+        else:
+            model = AutoModelForDepthEstimation.from_pretrained(model_id)
+    except Exception:
+        model = AutoModelForDepthEstimation.from_pretrained(model_id, local_files_only=True)
     try:
         model.gradient_checkpointing_enable()
     except Exception:
@@ -114,14 +120,16 @@ def predict_depth(model, images: torch.Tensor, out_hw) -> torch.Tensor:
 # --------------------------- validation (held-out MAE) ---------------------------
 
 @torch.no_grad()
-def evaluate_mae(model, device, limit: int, crop: int, cache_dir) -> float:
+def evaluate_mae(model, device, limit: int, crop: int, cache_dir,
+                 gamus_root=None, offline: bool = False) -> float:
     """Direct metric MAE on a held-out val subset — no calibration, no normalization.
-    Streams tiles from HuggingFace Hub; locally cached in cache_dir."""
+    Reads from local disk, cache, or Hub."""
     import numpy as np
     import metrics
     import gamus_eval_loader as loader
 
-    src = loader.iter_eval_tiles("val", limit=limit)
+    src = loader.iter_eval_tiles("val", limit=limit, cache_dir=Path(cache_dir) if cache_dir else None,
+                                 gamus_root=Path(gamus_root) if gamus_root else None, offline=offline)
 
     import metric_dataset as md
     model.eval()
@@ -205,7 +213,20 @@ def train(args) -> int:
            blend=args.blend, aux_fraction=args.aux_fraction,
            w_silog=args.w_silog, w_l1=args.w_l1, w_grad=args.w_grad, w_lt=args.w_lt)
 
-    model = load_model(args.model, device)
+    offline = getattr(args, "offline", False)
+    if offline:
+        import os
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        print("Offline mode ENABLED: using local datasets and cached weights only.")
+
+    gamus_root = getattr(args, "gamus_root", None)
+    if gamus_root is None:
+        default_root = UPGRADE_DIR.parent / "GAMUS"
+        if default_root.exists():
+            gamus_root = str(default_root)
+
+    model = load_model(args.model, device, offline=offline)
     if args.lora:
         import adapters
         model = adapters.wrap_lora(model, r=args.lora_r, alpha=args.lora_alpha,
@@ -231,7 +252,10 @@ def train(args) -> int:
     import metric_dataset as md
     dataset = md.MetricGAMUSDataset(split="train", crop=args.crop, augment=args.augment,
                                     cache_dir=Path(args.cache_dir),
-                                    tile_size=args.tile_size)
+                                    gamus_root=Path(gamus_root) if gamus_root else None,
+                                    offline=offline,
+                                    tile_size=args.tile_size,
+                                    val_tiles=args.val_tiles)
     # Optional dataset blend: GAMUS (native tiling) + harmonized aux sources
     # (Open-Canopy / GBH) mixed in at a controlled fraction. Only after GAMUS-only
     # beats the baseline (research §2.8 sequencing).
@@ -264,7 +288,8 @@ def train(args) -> int:
 
     loader = DataLoader(dataset, batch_size=args.batch, shuffle=True,
                         num_workers=args.workers, pin_memory=True, drop_last=True)
-    print(f"Train samples: {len(dataset)} | batch {args.batch} x grad-accum {args.grad_accum} | ONLINE (HF Hub)")
+    mode_str = "OFFLINE (Local)" if offline else "ONLINE (HF Hub)"
+    print(f"Train samples: {len(dataset)} | batch {args.batch} x grad-accum {args.grad_accum} | {mode_str}")
 
     ckpt_dir = Path(getattr(args, "ckpt_dir", None) or CKPT_DIR)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -299,7 +324,7 @@ def train(args) -> int:
         # on the MEAN — so a blend that improves forests/diversity isn't rejected
         # just because GAMUS-urban MAE was flat.
         maes = {"gamus": evaluate_mae(model, device, limit=args.val_tiles, crop=args.crop,
-                                      cache_dir=args.cache_dir)}
+                                      cache_dir=args.cache_dir, gamus_root=gamus_root, offline=offline)}
         for vs in aux_val_sources:
             maes[vs.name] = evaluate_aux_mae(model, device, vs, args.aux_gsd, args.crop,
                                              limit=args.val_tiles)
@@ -340,10 +365,14 @@ def train(args) -> int:
 
 def smoke(args) -> int:
     """Prove forward -> meters loss -> backward -> step wiring on CPU, no downloads
-    beyond the (cached) small model, no GAMUS."""
+    beyond the cached model, no GAMUS."""
     device = torch.device("cpu")
-    print("SMOKE: loading small model on CPU...")
-    model = load_model(SMALL_MODEL_ID, device)
+    print("SMOKE: loading model on CPU...")
+    try:
+        model = load_model(SMALL_MODEL_ID, device, offline=args.offline)
+    except Exception:
+        print(f"SMOKE: {SMALL_MODEL_ID} not cached locally; falling back to {LARGE_MODEL_ID}...")
+        model = load_model(LARGE_MODEL_ID, device, offline=args.offline)
     model.train()
     criterion = ml.MetricLoss()
     optim = torch.optim.AdamW(build_param_groups(model, 5e-6, 5e-5), weight_decay=0.01)
@@ -417,6 +446,10 @@ def main() -> int:
                     help="common GSD (m) to harmonize aux sources to")
     ap.add_argument("--cache-dir", default=str(DATA_CACHE), dest="cache_dir",
                     help="local tile cache dir; hf_hub_download writes here, reused on repeated runs")
+    ap.add_argument("--gamus-root", default=None, dest="gamus_root",
+                    help="local GAMUS dataset root directory (e.g. D:\\Depth-Wizard\\GAMUS; defaults to ./GAMUS if present)")
+    ap.add_argument("--offline", action="store_true",
+                    help="run 100%% offline using local datasets and cached weights only")
     ap.add_argument("--ckpt-dir", default=str(CKPT_DIR), dest="ckpt_dir",
                     help="where to write metric_best.pth / metric_last.pth")
     ap.add_argument("--smoke", action="store_true", help="CPU wiring check, no GAMUS/GPU")
