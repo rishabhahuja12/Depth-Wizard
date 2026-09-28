@@ -33,6 +33,7 @@ sys.path.insert(0, str(UPGRADE_DIR / "evaluation"))
 sys.path.insert(0, str(UPGRADE_DIR))
 
 import metric_losses as ml  # noqa: E402
+import logging  # noqa: E402
 from logging_config import get_logger, log_kv  # noqa: E402
 
 LARGE_MODEL_ID = "depth-anything/Depth-Anything-V2-Large-hf"
@@ -120,37 +121,36 @@ def predict_depth(model, images: torch.Tensor, out_hw) -> torch.Tensor:
 # --------------------------- validation (held-out MAE) ---------------------------
 
 @torch.no_grad()
-def evaluate_mae(model, device, limit: int, crop: int, cache_dir,
-                 gamus_root=None, offline: bool = False) -> float:
-    """Direct metric MAE on a held-out val subset — no calibration, no normalization.
-    Reads from local disk, cache, or Hub."""
+def evaluate_mae(model, device, split: str, limit: int, crop: int, cache_dir,
+                 gamus_root=None, offline: bool = False) -> dict:
+    """Held-out metric error on a GAMUS split ('val' or 'test'), on native-res crop
+    cells (like training). Returns {'mae', 'tall', 'n'}; mae/tall are NaN if no tiles
+    are available (offline with no local `split` tiles — never a train-leak fallback,
+    so the number is honest or absent)."""
     import numpy as np
     import metrics
     import gamus_eval_loader as loader
-
-    src = loader.iter_eval_tiles("val", limit=limit, cache_dir=Path(cache_dir) if cache_dir else None,
-                                 gamus_root=Path(gamus_root) if gamus_root else None, offline=offline)
-
     import metric_dataset as md
+
+    src = loader.iter_eval_tiles(split, limit=limit,
+                                 cache_dir=Path(cache_dir) if cache_dir else None,
+                                 gamus_root=Path(gamus_root) if gamus_root else None, offline=offline)
     model.eval()
-    errs = []
+    errs, tall = [], []
     for _tid, _city, rgb, agl in src:
-        # Evaluate on native-resolution crop cells (like training), NOT by squishing
-        # the whole 1024 tile down to `crop` — that halved the GSD and skewed val MAE.
-        cells = md.tile_grid(agl.shape[0], agl.shape[1], crop)
-        if not cells:                        # tile smaller than crop: fall back to resize
-            x = _rgb_to_tensor(rgb, crop).to(device)
-            pred = predict_depth(model, x.unsqueeze(0), agl.shape).squeeze(0).float().cpu().numpy()
-            errs.append(metrics.mae(pred, agl))
-            continue
+        cells = md.tile_grid(agl.shape[0], agl.shape[1], crop) or [(0, 0)]
         for r0, c0 in cells:
             rgb_c, agl_c = rgb[r0:r0 + crop, c0:c0 + crop], agl[r0:r0 + crop, c0:c0 + crop]
             x = torch.from_numpy(md.normalize_rgb(rgb_c)).to(device)   # native res, no resize
             pred = predict_depth(model, x.unsqueeze(0), agl_c.shape).squeeze(0).float().cpu().numpy()
             errs.append(metrics.mae(pred, agl_c))
+            tall.append(metrics.tall_structure_mae(pred, agl_c))       # buildings only
     model.train()
-    errs = [e for e in errs if e == e]  # drop nan
-    return float(np.mean(errs)) if errs else float("nan")
+    errs = [e for e in errs if e == e]
+    tall = [e for e in tall if e == e]
+    return {"mae": float(np.mean(errs)) if errs else float("nan"),
+            "tall": float(np.mean(tall)) if tall else float("nan"),
+            "n": len(errs)}
 
 
 @torch.no_grad()
@@ -237,8 +237,27 @@ def train(args) -> int:
     criterion = ml.MetricLoss(w_silog=args.w_silog, w_l1=args.w_l1,
                               w_grad=args.w_grad, w_lt=args.w_lt).to(device)
     stage = 1 + (args.w_grad > 0) + (args.w_lt > 0)
-    print(f"Loss stage {stage}: silog={args.w_silog} l1={args.w_l1} "
-          f"grad={args.w_grad} longtail={args.w_lt}")
+    log_kv(log, "loss stage", stage=stage, w_silog=args.w_silog, w_l1=args.w_l1,
+           w_grad=args.w_grad, w_lt=args.w_lt)
+
+    # Warm-start (Stage 2+): load ONLY weights from a prior checkpoint (e.g. the
+    # GAMUS metric_best.pth) with a FRESH optimizer/schedule — a proper stage handoff,
+    # not a full --resume. Skipped if --resume (which restores full state instead).
+    if getattr(args, "init_weights", None) and not args.resume:
+        try:
+            ck = torch.load(args.init_weights, map_location=device, weights_only=True)
+        except Exception:
+            ck = torch.load(args.init_weights, map_location=device, weights_only=False)
+        sd = ck["model_state_dict"] if isinstance(ck, dict) and "model_state_dict" in ck else ck
+        r = model.load_state_dict(sd, strict=False)
+        matched = len(model.state_dict()) - len(getattr(r, "missing_keys", []))
+        log_kv(log, "warm-start from init-weights", path=str(args.init_weights),
+               matched=f"{matched}/{len(model.state_dict())}",
+               ckpt_val_mae=(ck.get("val_mae_m") if isinstance(ck, dict) else None))
+        if matched < 0.5 * len(model.state_dict()):
+            log_kv(log, "init-weights matched <50% of keys — wrong checkpoint/arch?",
+                   level=logging.WARNING)
+
     optim = torch.optim.AdamW(
         build_param_groups(model, args.enc_lr, args.head_lr,
                            lora_lr=getattr(args, "lora_lr", None) if args.lora else None),
@@ -280,16 +299,20 @@ def train(args) -> int:
             aux_mix = multi_dataset.MixedMetricDataset(aux_sources, weights, target_gsd=args.aux_gsd,
                                                        crop=args.crop, total_per_epoch=aux_total)
             dataset = ConcatDataset([dataset, aux_mix])
-            print(f"Blend: GAMUS {gamus_len} + aux {len(aux_mix)} "
-                  f"(train {[(s.name, len(s)) for s in aux_sources]}, "
-                  f"val {[(s.name, len(s)) for s in aux_val_sources]}); weights={weights}")
+            log_kv(log, "blend assembled", gamus=gamus_len, aux=len(aux_mix),
+                   train_sources=str([(s.name, len(s)) for s in aux_sources]),
+                   val_sources=str([(s.name, len(s)) for s in aux_val_sources]),
+                   weights=str(weights))
         else:
-            print("Blend requested but no aux sources found — training on GAMUS only.")
+            log_kv(log, "blend requested but NO aux sources found — training GAMUS only "
+                        "(check --oc-root/--dfc-root paths and folder layout)",
+                   level=logging.WARNING)
 
     loader = DataLoader(dataset, batch_size=args.batch, shuffle=True,
                         num_workers=args.workers, pin_memory=True, drop_last=True)
     mode_str = "OFFLINE (Local)" if offline else "ONLINE (HF Hub)"
-    print(f"Train samples: {len(dataset)} | batch {args.batch} x grad-accum {args.grad_accum} | {mode_str}")
+    log_kv(log, "dataset ready", train_samples=len(dataset), batch=args.batch,
+           grad_accum=args.grad_accum, mode=mode_str)
 
     ckpt_dir = Path(getattr(args, "ckpt_dir", None) or CKPT_DIR)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -300,7 +323,8 @@ def train(args) -> int:
     # Resume an interrupted run from the last full-state checkpoint.
     if args.resume and last_path.exists():
         start_epoch, best_mae = load_ckpt(last_path, model, optim, sched)
-        print(f"Resumed from {last_path.name}: {start_epoch} epochs done, best MAE {best_mae:.3f}")
+        log_kv(log, "resumed", ckpt=last_path.name, epochs_done=start_epoch,
+               best_mae=round(best_mae, 3))
 
     for epoch in range(start_epoch, args.epochs):
         t0 = time.time()
@@ -323,8 +347,9 @@ def train(args) -> int:
         # G2: validate on GAMUS (urban) AND each held-out aux landscape, then gate
         # on the MEAN — so a blend that improves forests/diversity isn't rejected
         # just because GAMUS-urban MAE was flat.
-        maes = {"gamus": evaluate_mae(model, device, limit=args.val_tiles, crop=args.crop,
-                                      cache_dir=args.cache_dir, gamus_root=gamus_root, offline=offline)}
+        g = evaluate_mae(model, device, "val", args.val_tiles, args.crop,
+                         args.cache_dir, gamus_root, offline)
+        maes = {"gamus": g["mae"]}
         for vs in aux_val_sources:
             maes[vs.name] = evaluate_aux_mae(model, device, vs, args.aux_gsd, args.crop,
                                              limit=args.val_tiles)
@@ -332,10 +357,20 @@ def train(args) -> int:
         val_mae = sum(finite) / len(finite) if finite else float("nan")  # landscape mean
         dt = (time.time() - t0) / 60
         per = " ".join(f"{k}={v:.2f}" for k, v in maes.items())
-        log_kv(log, f"epoch {epoch+1}/{args.epochs}",
-               train_loss=round(running / max(len(loader), 1), 4),
-               val_mean_mae=round(val_mae, 3), per_landscape=f"[{per}]",
-               lr=round(sched.get_last_lr()[0], 8), minutes=round(dt, 1))
+        if val_mae != val_mae:
+            log_kv(log, "val SKIPPED — no real held-out val tiles (offline needs local "
+                        "GAMUS val; prefetch --splits val). Not gating/saving this epoch.",
+                   level=logging.WARNING)
+        fields = dict(train_loss=round(running / max(len(loader), 1), 4),
+                      val_mean_mae=round(val_mae, 3), gamus_tall_mae=round(g["tall"], 3),
+                      per_landscape=f"[{per}]", lr=round(sched.get_last_lr()[0], 8),
+                      minutes=round(dt, 1))
+        if getattr(args, "test_tiles", 0) > 0:       # honest generalization number
+            t = evaluate_mae(model, device, "test", args.test_tiles, args.crop,
+                             args.cache_dir, gamus_root, offline)
+            fields["test_mae"] = round(t["mae"], 3)
+            fields["test_tall_mae"] = round(t["tall"], 3)
+        log_kv(log, f"epoch {epoch+1}/{args.epochs}", **fields)
 
         if val_mae == val_mae and val_mae < best_mae:
             best_mae = val_mae
@@ -422,8 +457,14 @@ def main() -> int:
                     help="Stage 3: long-tail tall-structure weight (0 = off)")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--val-tiles", type=int, default=40, dest="val_tiles")
+    ap.add_argument("--test-tiles", type=int, default=0, dest="test_tiles",
+                    help="also score this many held-out TEST tiles each epoch (0=off) — "
+                         "the honest generalization number (needs local/online test tiles)")
+    ap.add_argument("--init-weights", default=None, dest="init_weights",
+                    help="warm-start from a prior checkpoint's WEIGHTS (fresh optimizer/schedule); "
+                         "use for the Stage-2 blend from the GAMUS metric_best.pth")
     ap.add_argument("--resume", action="store_true",
-                    help="resume from upgrade/checkpoints/metric_last.pth if present")
+                    help="resume FULL state from upgrade/checkpoints/metric_last.pth (weights+optim+sched+epoch)")
     ap.add_argument("--tile-size", type=int, default=1024, dest="tile_size",
                     help="source tile size for deterministic cell grid (GAMUS = 1024)")
     # Dataset blend (Open-Canopy / aux sources) — only after GAMUS-only wins.

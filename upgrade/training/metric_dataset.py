@@ -342,13 +342,12 @@ class MetricGAMUSDataset:
             print(f"GAMUS '{split}': found {len(local_pairs)} local paired tiles on disk", flush=True)
             return local_pairs
 
+        # NO train-tail fallback for 'val' — reusing train tiles as val is a hard
+        # leak (it produced the fake 0.64 val MAE). Real held-out val tiles only.
         if split == "val":
-            train_pairs = self._scan_local_pairs("train")
-            if train_pairs:
-                val_count = min(val_tiles, max(1, len(train_pairs)))
-                val_sample = train_pairs[:val_count]
-                print(f"GAMUS 'val': Using {len(val_sample)} sample tiles from local train split for evaluation tracking.", flush=True)
-                return val_sample
+            print("GAMUS 'val': no local val tiles found; NOT falling back to train "
+                  "(that would leak). Prefetch val once: "
+                  "python upgrade/training/gamus_prefetch.py --splits val", flush=True)
 
         if self.offline:
             print(f"GAMUS '{split}': offline mode and no local paired tiles found.", flush=True)

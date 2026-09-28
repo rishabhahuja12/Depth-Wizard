@@ -89,13 +89,14 @@ def list_eval_tiles(
     if local_pairs:
         return local_pairs
 
-    if split == "val":
-        train_pairs = _scan_local_pairs("train", gamus_root, cache_path)
-        if train_pairs:
-            val_count = min(40, max(1, len(train_pairs) // 10))
-            return train_pairs[-val_count:]
-
+    # NO train-tail fallback. Using train tiles as "val" is a hard leak that made
+    # val MAE meaningless (memorization -> the fake 0.64). If real held-out tiles
+    # aren't available we return [] and the caller reports a skipped/NaN metric —
+    # never a leaked number.
     if offline:
+        print(f"GAMUS eval loader: OFFLINE and no local '{split}' tiles found. "
+              f"Real held-out '{split}' tiles are required (no train-tail fallback). "
+              f"Prefetch them once: python upgrade/training/gamus_prefetch.py --splits {split}")
         return []
 
     try:
