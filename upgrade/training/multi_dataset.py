@@ -13,6 +13,7 @@ real Open-Canopy/GBH ingestion is the GeoTiffHeightSource adapter (rasterio I/O)
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -80,7 +81,13 @@ class MixedMetricDataset:
 
         si, i = self.samples[idx]
         src = self.sources[si]
-        rgb, height = src.raw(i)
+        # Read only the native window we need, not the whole raster. Aux tiles can be
+        # hundreds of MB; loading one whole hangs. win_px native px resample to >= crop.
+        if hasattr(src, "raw_window"):
+            win_px = math.ceil(self.crop * self.target_gsd / max(src.gsd, 1e-6)) + 8
+            rgb, height = src.raw_window(i, win_px)
+        else:
+            rgb, height = src.raw(i)
 
         # Harmonize: resample to the common grid, force meters-above-ground, then
         # take a crop-sized cell AT that GSD (don't resize the whole tile — G3).
@@ -147,27 +154,53 @@ class GeoTiffHeightSource:
     def __len__(self) -> int:
         return len(self.pairs)
 
-    def raw(self, i: int):
+    @staticmethod
+    def _to_uint8(rgb: np.ndarray) -> np.ndarray:
+        """Percentile-stretch a non-8-bit RGB region to viewable uint8."""
+        if rgb.dtype == np.uint8:
+            return rgb[..., :3]
+        out = np.empty(rgb.shape[:2] + (3,), np.uint8)
+        for c in range(3):
+            b = rgb[..., c].astype(np.float32)
+            lo, hi = np.percentile(b[np.isfinite(b)], [2, 98]) if np.any(np.isfinite(b)) else (0, 1)
+            out[..., c] = np.clip((b - lo) / (hi - lo + 1e-6), 0, 1).astype(np.float32).__mul__(255).astype(np.uint8)
+        return out
+
+    def _read(self, i: int, win_px: int | None = None):
+        """Read a paired RGB+height region. win_px=None reads the WHOLE tile; an int
+        reads only a centered win_px x win_px native window — crucial for large aux
+        rasters (Open-Canopy tiles are 100s of MB; loading one whole hangs/thrashes)."""
         import rasterio
+        from rasterio.windows import Window
         rgb_p, h_p = self.pairs[i]
+
+        def _win(ds):
+            if win_px is None:
+                return None
+            w = min(win_px, ds.width)
+            h = min(win_px, ds.height)
+            return Window(max(0, (ds.width - w) // 2), max(0, (ds.height - h) // 2), w, h)
+
         with rasterio.open(rgb_p) as ds:
+            win = _win(ds)
             if self.rgb_bands:
-                rgb = np.stack([ds.read(b) for b in self.rgb_bands], axis=-1)
+                rgb = np.stack([ds.read(b, window=win) for b in self.rgb_bands], axis=-1)
             else:
-                bands = min(ds.count, 3)
-                rgb = np.stack([ds.read(b + 1) for b in range(bands)], axis=-1)
-                if bands == 1:
+                nb = min(ds.count, 3)
+                rgb = np.stack([ds.read(b + 1, window=win) for b in range(nb)], axis=-1)
+                if nb == 1:
                     rgb = np.repeat(rgb[..., :1], 3, axis=-1)
-        if rgb.dtype != np.uint8:  # percentile-stretch non-8-bit to viewable RGB
-            out = np.empty(rgb.shape[:2] + (3,), np.uint8)
-            for c in range(3):
-                b = rgb[..., c].astype(np.float32)
-                lo, hi = np.percentile(b[np.isfinite(b)], [2, 98]) if np.any(np.isfinite(b)) else (0, 1)
-                out[..., c] = np.clip((b - lo) / (hi - lo + 1e-6), 0, 1).astype(np.float32).__mul__(255).astype(np.uint8)
-            rgb = out
+        rgb = self._to_uint8(rgb)
         with rasterio.open(h_p) as ds:
-            height = ds.read(1).astype(np.float32)
+            win = _win(ds)
+            height = ds.read(1, window=win).astype(np.float32)
             nod = self.height_nodata if self.height_nodata is not None else ds.nodata
         height = hz.sanitize_height(height, nodata=nod, scale=self.height_scale,
                                     max_m=self.max_height_m)
         return rgb[..., :3], height
+
+    def raw(self, i: int):
+        return self._read(i, win_px=None)
+
+    def raw_window(self, i: int, win_px: int):
+        return self._read(i, win_px=win_px)
