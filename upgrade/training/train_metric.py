@@ -343,6 +343,14 @@ def train(args) -> int:
                 optim.step()
                 optim.zero_grad(set_to_none=True)
 
+            # Heartbeat (~20/epoch) so a long silent epoch (workers=0) is visibly alive.
+            if (i + 1) % max(1, len(loader) // 20) == 0:
+                el = time.time() - t0
+                log_kv(log, f"  e{epoch+1} step {i+1}/{len(loader)}",
+                       avg_loss=round(running / (i + 1), 4),
+                       samples_per_s=round((i + 1) * args.batch / max(el, 1e-6), 2),
+                       eta_min=round((len(loader) - (i + 1)) * el / max(i + 1, 1) / 60, 1))
+
         sched.step()
         # G2: validate on GAMUS (urban) AND each held-out aux landscape, then gate
         # on the MEAN — so a blend that improves forests/diversity isn't rejected
