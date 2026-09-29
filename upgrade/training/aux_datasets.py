@@ -110,14 +110,37 @@ def m4heights_source(root, rgb_subdir: str = "rgb", height_subdir: str = "height
                                rgb_glob=rgb_glob, **kw)
 
 
-def dfc2023_source(root, rgb_subdir: str = "rgb", height_subdir: str = "ndsm",
+def _find_data_subdir(root, names) -> str:
+    """Find the first subdir (direct child, else anywhere under root) whose name is in
+    `names` and that actually contains .tif files. Returns a path relative to root.
+    Makes an adapter robust to layout variation (rgb vs images, ndsm vs dsm vs gt)
+    and to nesting (train/rgb/...) without hard-coding one folder name."""
+    root = Path(root)
+    for n in names:                                   # prefer a direct child
+        d = root / n
+        if d.is_dir() and next(d.rglob("*.tif"), None) is not None:
+            return n
+    for n in names:                                   # else search deeper
+        for d in root.rglob(n):
+            if d.is_dir() and next(d.rglob("*.tif"), None) is not None:
+                return str(d.relative_to(root))
+    return names[0]                                   # fallback (will report 0 pairs loudly)
+
+
+def dfc2023_source(root, rgb_subdir: str | None = None, height_subdir: str | None = None,
                    rgb_glob: str = "*.tif", **kw) -> GeoTiffHeightSource:
     """DFC2023 Track 2 as a height source (nDSM, meters-AGL), global diversity.
 
-    Use the TRAIN split (val/test GT withheld); drop the SAR channel. nodata in the
-    nDSM is cleaned by the reader (sanitize_height). Some tiles are known to be
-    slightly misaligned — down-weight via --aux-weights if it hurts."""
+    Auto-detects the optical and height folders (rgb/images/optical and
+    ndsm/dsm/gt/height) so it works with the raw DFC layout or your classified
+    rgb/+ndsm/ dirs, nested or not. Use the TRAIN split (val/test GT withheld); the
+    reader ignores extra bands (SAR) beyond 3 and cleans nodata (sanitize_height).
+    Some tiles are slightly misaligned — down-weight via --aux-weights if it hurts.
+    Pass rgb_subdir/height_subdir explicitly to override auto-detection."""
     root = Path(root)
+    rgb_subdir = rgb_subdir or _find_data_subdir(root, ["rgb", "images", "optical", "opt", "rgbi"])
+    height_subdir = height_subdir or _find_data_subdir(root, ["ndsm", "dsm", "gt", "height", "agl", "depth"])
+    print(f"dfc2023: rgb_subdir='{rgb_subdir}'  height_subdir='{height_subdir}'  (under {root})")
     return GeoTiffHeightSource(name="dfc2023", gsd=DFC2023_GSD,
                                rgb_dir=root / rgb_subdir, height_dir=root / height_subdir,
                                rgb_glob=rgb_glob, **kw)
