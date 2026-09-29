@@ -1,12 +1,8 @@
-.venv\Scripts\python.exe upgrade\training\diagnose_dfc.py --dfc-root D:\Depth-Wizard\DFC2023\train
-
-
-
 .venv\Scripts\python.exe upgrade\training\train_metric.py --offline --blend `
   --oc-root D:\Depth-Wizard\Open-Canopy --dfc-root D:\Depth-Wizard\DFC2023\train `
   --gamus-root D:\Depth-Wizard\GAMUS `
-  --init-weights upgrade\checkpoints\metric_gamus_best.pth `
+  --init-weights upgrade\checkpoints\metric_best.pth `
   --ckpt-dir upgrade\checkpoints\blend_oc_dfc `
   --epochs 15 --warmup 2 --enc-lr 2.5e-6 --head-lr 2.5e-5 `
   --batch 2 --grad-accum 8 --crop 504 --aux-fraction 0.3 `
-  --aux-weights "open_canopy=1.0,dfc2023=1.0" --test-tiles 40 --workers 0
+  --aux-weights "open_canopy=0.5,dfc2023=1.0" --test-tiles 40 --workers 0
