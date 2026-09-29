@@ -39,9 +39,9 @@ def main() -> int:
     rgb_p, h_p = src.pairs[0]
     with rasterio.open(rgb_p) as ds:
         print(f"  RGB  {Path(rgb_p).name}: {ds.width}x{ds.height} count={ds.count} "
-              f"dtype={ds.dtype} tiled={ds.is_tiled}", flush=True)
+              f"dtype={ds.dtypes[0]} tiled={ds.is_tiled}", flush=True)
     with rasterio.open(h_p) as ds:
-        print(f"  nDSM {Path(h_p).name}: {ds.width}x{ds.height} dtype={ds.dtype} "
+        print(f"  nDSM {Path(h_p).name}: {ds.width}x{ds.height} dtype={ds.dtypes[0]} "
               f"nodata={ds.nodata} tiled={ds.is_tiled}", flush=True)
 
     _, h = src.raw(0)
