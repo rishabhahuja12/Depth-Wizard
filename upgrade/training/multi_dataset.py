@@ -85,7 +85,11 @@ class MixedMetricDataset:
         # hundreds of MB; loading one whole hangs. win_px native px resample to >= crop.
         if hasattr(src, "raw_window"):
             win_px = math.ceil(self.crop * self.target_gsd / max(src.gsd, 1e-6)) + 8
-            rgb, height = src.raw_window(i, win_px)
+            # Deterministic-but-varied window position per sample: turns a few giant
+            # mosaics into many distinct crops (idx-seeded, so reproducible each epoch).
+            r = np.random.default_rng(idx)
+            pos = (float(r.random()), float(r.random()))
+            rgb, height = src.raw_window(i, win_px, pos=pos)
         else:
             rgb, height = src.raw(i)
 
@@ -166,10 +170,12 @@ class GeoTiffHeightSource:
             out[..., c] = np.clip((b - lo) / (hi - lo + 1e-6), 0, 1).astype(np.float32).__mul__(255).astype(np.uint8)
         return out
 
-    def _read(self, i: int, win_px: int | None = None):
+    def _read(self, i: int, win_px: int | None = None, pos: tuple | None = None):
         """Read a paired RGB+height region. win_px=None reads the WHOLE tile; an int
-        reads only a centered win_px x win_px native window — crucial for large aux
-        rasters (Open-Canopy tiles are 100s of MB; loading one whole hangs/thrashes)."""
+        reads only a win_px x win_px native window — crucial for large aux rasters
+        (Open-Canopy tiles are 40000x40000; loading one whole is ~11GB and hangs).
+        `pos`=(row_frac, col_frac) in [0,1] places the window (None = centered); a
+        varied pos per sample turns a few giant mosaics into many distinct crops."""
         import rasterio
         from rasterio.windows import Window
         rgb_p, h_p = self.pairs[i]
@@ -179,7 +185,13 @@ class GeoTiffHeightSource:
                 return None
             w = min(win_px, ds.width)
             h = min(win_px, ds.height)
-            return Window(max(0, (ds.width - w) // 2), max(0, (ds.height - h) // 2), w, h)
+            if pos is None:
+                r0, c0 = max(0, (ds.height - h) // 2), max(0, (ds.width - w) // 2)
+            else:
+                rf, cf = pos
+                r0 = int(float(rf) * max(0, ds.height - h))
+                c0 = int(float(cf) * max(0, ds.width - w))
+            return Window(c0, r0, w, h)
 
         with rasterio.open(rgb_p) as ds:
             win = _win(ds)
@@ -202,5 +214,5 @@ class GeoTiffHeightSource:
     def raw(self, i: int):
         return self._read(i, win_px=None)
 
-    def raw_window(self, i: int, win_px: int):
-        return self._read(i, win_px=win_px)
+    def raw_window(self, i: int, win_px: int, pos: tuple | None = None):
+        return self._read(i, win_px=win_px, pos=pos)
