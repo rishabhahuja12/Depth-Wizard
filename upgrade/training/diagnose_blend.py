@@ -42,16 +42,34 @@ def main() -> int:
         print("  0 pairs — check folder layout (images/ + canopy_height/ *.tif).")
         return 1
 
-    rgb_p, h_p = src.pairs[0]
-    for label, p in (("RGB", rgb_p), ("HEIGHT", h_p)):
-        with rasterio.open(p) as ds:
-            prof = {k: ds.profile.get(k) for k in
-                    ("width", "height", "count", "dtype", "compress", "tiled",
-                     "blockxsize", "blockysize")}
-            print(f"{label} {Path(p).name}: {prof}", flush=True)
-            print(f"   is_tiled={ds.is_tiled}  block_shapes={ds.block_shapes[:1]}  "
-                  f"overviews={ds.overviews(1)[:3]}", flush=True)
+    # Scan EVERY tile's block layout (metadata only — no pixel read, cannot hang).
+    # A striped tile (is_tiled=False) makes a windowed read decompress the whole
+    # 40000x40000 -> that's the hang. Also flags unreadable/partial downloads.
+    print("scanning all tiles (metadata only):", flush=True)
+    striped = []
+    for i, (rgb_p, h_p) in enumerate(src.pairs):
+        try:
+            with rasterio.open(rgb_p) as ds:
+                rt, rw, rh = ds.is_tiled, ds.width, ds.height
+            with rasterio.open(h_p) as ds:
+                ht = ds.is_tiled
+            ok = rt and ht
+            flag = "" if ok else "  <-- STRIPED (hangs windowed reads)"
+            print(f"  [{i:2d}] {Path(rgb_p).name[:34]:34s} rgb_tiled={rt} h_tiled={ht} "
+                  f"{rw}x{rh}{flag}", flush=True)
+            if not ok:
+                striped.append(i)
+        except Exception as e:  # noqa: BLE001
+            print(f"  [{i:2d}] {Path(rgb_p).name[:34]:34s} ERROR: {type(e).__name__}: {e}", flush=True)
+            striped.append(i)
+    if striped:
+        print(f"\n>>> {len(striped)} PROBLEM tile(s): {striped} — these hang the blend. "
+              f"Fix: COG-convert them (or all). I'll ship a one-time converter.", flush=True)
+    else:
+        print("\nAll 18 tiles are tiled COGs — reads are cheap; the hang is NOT a tile "
+              "(check that training used --workers 0).", flush=True)
 
+    rgb_p, h_p = src.pairs[0]
     win_px = int(round(a.crop * a.aux_gsd / max(src.gsd, 1e-6))) + 8
     print(f"\nwindow size the trainer reads: {win_px}x{win_px} native px", flush=True)
     for pos in [(0.5, 0.5), (0.1, 0.9), (0.9, 0.2)]:
