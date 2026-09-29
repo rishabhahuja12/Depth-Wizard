@@ -35,6 +35,10 @@ sys.path.insert(0, str(UPGRADE_DIR))
 import metric_losses as ml  # noqa: E402
 import logging  # noqa: E402
 from logging_config import get_logger, log_kv  # noqa: E402
+try:
+    from tqdm import tqdm  # live per-epoch progress bar (elapsed / ETA / rate / loss)
+except ImportError:  # optional — falls back to the heartbeat log only
+    tqdm = None
 
 LARGE_MODEL_ID = "depth-anything/Depth-Anything-V2-Large-hf"
 SMALL_MODEL_ID = "depth-anything/Depth-Anything-V2-Small-hf"
@@ -326,11 +330,15 @@ def train(args) -> int:
         log_kv(log, "resumed", ckpt=last_path.name, epochs_done=start_epoch,
                best_mae=round(best_mae, 3))
 
+    n_steps = len(loader)
     for epoch in range(start_epoch, args.epochs):
         t0 = time.time()
         running = 0.0
         optim.zero_grad(set_to_none=True)
-        for i, (images, targets) in enumerate(loader):
+        # Live progress bar on the console: % · elapsed<ETA · batch/s · loss.
+        bar = (tqdm(loader, desc=f"epoch {epoch+1}/{args.epochs}", unit="batch",
+                    dynamic_ncols=True, leave=True) if tqdm else loader)
+        for i, (images, targets) in enumerate(bar):
             images = images.to(device, non_blocking=True)
             targets = targets.float().to(device, non_blocking=True)
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
@@ -338,18 +346,23 @@ def train(args) -> int:
                 loss = criterion(pred, targets) / args.grad_accum
             loss.backward()
             running += loss.item() * args.grad_accum
+            if tqdm:
+                bar.set_postfix(loss=f"{running/(i+1):.3f}", lr=f"{sched.get_last_lr()[0]:.1e}")
             if (i + 1) % args.grad_accum == 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optim.step()
                 optim.zero_grad(set_to_none=True)
 
-            # Heartbeat (~20/epoch) so a long silent epoch (workers=0) is visibly alive.
-            if (i + 1) % max(1, len(loader) // 20) == 0:
+            # Heartbeat (~20/epoch) into the STRUCTURED log file too (tqdm is console-only,
+            # and gets mangled if you redirect stdout to a file).
+            if (i + 1) % max(1, n_steps // 20) == 0:
                 el = time.time() - t0
-                log_kv(log, f"  e{epoch+1} step {i+1}/{len(loader)}",
+                log_kv(log, f"  e{epoch+1} step {i+1}/{n_steps}",
+                       pct=round(100 * (i + 1) / n_steps, 1),
                        avg_loss=round(running / (i + 1), 4),
                        samples_per_s=round((i + 1) * args.batch / max(el, 1e-6), 2),
-                       eta_min=round((len(loader) - (i + 1)) * el / max(i + 1, 1) / 60, 1))
+                       elapsed_min=round(el / 60, 1),
+                       eta_min=round((n_steps - (i + 1)) * el / max(i + 1, 1) / 60, 1))
 
         sched.step()
         # G2: validate on GAMUS (urban) AND each held-out aux landscape, then gate
