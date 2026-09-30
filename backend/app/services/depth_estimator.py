@@ -36,7 +36,7 @@ def postprocess_depth(depth: np.ndarray, is_metric: bool) -> np.ndarray:
 class DepthEstimator:
     def __init__(self):
         self.device = torch.device(DEVICE if torch.cuda.is_available() else "cpu")
-        log.info("Loading Depth Anything V2 ViT-S", device=str(self.device))
+        log.info("Loading Depth Anything V2", model_id=MODEL_ID, device=str(self.device))
 
         try:
             self.processor = AutoImageProcessor.from_pretrained(MODEL_ID, local_files_only=True)
@@ -48,11 +48,16 @@ class DepthEstimator:
         self.model.eval()
         self.is_metric = False  # set True when a metric fine-tuned checkpoint is loaded
 
-        # Try loading fine-tuned weights if they exist. Accept both the serving name
-        # (best_model.pth) and the training output name (metric_best.pth), so a
-        # metric checkpoint copied into weights/ is actually picked up.
-        finetuned_path = next((WEIGHTS_DIR / n for n in ("best_model.pth", "metric_best.pth")
-                               if (WEIGHTS_DIR / n).exists()), None)
+        # Try loading fine-tuned weights if they exist. Prioritize metric_best.pth,
+        # and ignore any small dummy/stub files.
+        finetuned_path = next(
+            (
+                WEIGHTS_DIR / n
+                for n in ("metric_best.pth", "best_model.pth")
+                if (WEIGHTS_DIR / n).exists() and (WEIGHTS_DIR / n).stat().st_size > 1024 * 1024
+            ),
+            None,
+        )
         if finetuned_path is not None:
             log.info("Loading fine-tuned weights", path=str(finetuned_path))
             # Safe by default: weights_only=True blocks arbitrary code execution on

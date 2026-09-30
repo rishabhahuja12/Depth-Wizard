@@ -59,6 +59,9 @@ class StableSILogLoss(nn.Module):
         return torch.stack(losses).mean()
 
 
+SILogLoss = StableSILogLoss  # Backward compatibility alias
+
+
 class GradientMatchingLoss(nn.Module):
     def __init__(self):
         super().__init__()

@@ -22,6 +22,8 @@ graphify-out/cache/
 graphify-out/.graphify_*
 backend/weights/archive_run1/
 backend/weights/checkpoints/
+backend/weights/metric_best.pth
+*.zip
 *.npy
 *.npz
 GAMUS/

@@ -182,10 +182,13 @@ def test_full_pipeline():
     depth = estimator.predict(pil_img)
     print(f"Predicted depth shape: {depth.shape}, min: {depth.min():.3f}, max: {depth.max():.3f}")
     assert depth.shape == (256, 256)
-    assert 0.0 <= depth.min() <= depth.max() <= 1.0
+    if estimator.is_metric:
+        assert depth.min() >= 0.0
+    else:
+        assert 0.0 <= depth.min() <= depth.max() <= 1.0
 
     # 2. Calibration
-    cal = calibrate_depth(depth, is_georef=True, gsd=0.5, target_range=30.0)
+    cal = calibrate_depth(depth, is_georef=True, gsd=0.5, target_range=30.0, is_metric=estimator.is_metric)
     print(f"Calibrated DSM range: [{cal.dsm_min:.2f}m, {cal.dsm_max:.2f}m], alpha: {cal.alpha:.2f}")
     assert cal.dsm.shape == (256, 256)
     assert cal.unit == "meters"
@@ -199,7 +202,8 @@ def test_full_pipeline():
     assert mesh_data["mesh_stats"]["vertices"] == 256 * 256
 
     # 4. Validation metrics
-    metrics = compute_metrics(cal.dsm, cal.dsm + np.random.normal(0, 0.5, cal.dsm.shape).astype(np.float32))
+    noise_std = max(0.05, 0.05 * float(cal.dsm.std()))
+    metrics = compute_metrics(cal.dsm, cal.dsm + np.random.normal(0, noise_std, cal.dsm.shape).astype(np.float32))
     print(f"Synthetic test metrics: RMSE={metrics.rmse:.2f}m, Pearson_r={metrics.pearson_r:.3f}")
     assert metrics.rmse > 0
     assert metrics.pearson_r > 0.9

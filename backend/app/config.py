@@ -8,7 +8,7 @@ LOGS_DIR = BACKEND_ROOT / "logs"
 EXPORTS_DIR = BACKEND_ROOT / "exports"
 
 # Model config
-MODEL_ID = "depth-anything/Depth-Anything-V2-Small-hf"
+MODEL_ID = "depth-anything/Depth-Anything-V2-Large-hf"
 DEVICE = "cuda"
 INFERENCE_SIZE = 512  # pixels
 
